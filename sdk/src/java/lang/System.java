@@ -43,4 +43,5 @@ public class System {
     public static PrintStream err = new PrintStream(new NativeOutputStream());
     public static InputStream in = new NativeInputStream();
 
+    public static native long currentTimeMillis();
 }

@@ -43,6 +43,17 @@ public class StringBuilder {
         length = 0;
     }
 
+    public int length() {
+        return length;
+    }
+    public void setLength(int length) {
+        this.length = length;
+    }
+
+    public int charAt(int i) {
+        return buffer[i];
+    }
+
     private void ensureCapacity(int capacity) {
         while (capacity >= buffer.length) {
             char newBuffer[] = new char[buffer.length*2];
