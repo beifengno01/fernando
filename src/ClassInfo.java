@@ -46,6 +46,7 @@ import org.apache.bcel.classfile.ExceptionTable;
 import org.apache.bcel.classfile.Field;
 import org.apache.bcel.classfile.JavaClass;
 import org.apache.bcel.classfile.Method;
+import org.apache.bcel.generic.BasicType;
 import org.apache.bcel.generic.BranchInstruction;
 import org.apache.bcel.generic.ConstantPoolGen;
 import org.apache.bcel.generic.ConstantPushInstruction;
@@ -129,7 +130,7 @@ public class ClassInfo {
                 interfaceList.add(ci);
             }
         }
-        entryClass = entry;
+        entryClass = entry.replace('/', '.');
     }
 
     private final String name;
@@ -163,6 +164,9 @@ public class ClassInfo {
     }
     public static String getCMethName(Method m) {
         return escapeName(m.getName()+m.getSignature());
+    }
+    private static String getCFieldName(String name) {
+        return name.replaceAll("[\\$]", "_");
     }
 
     public static String getCType(Type type) {
@@ -302,6 +306,18 @@ public class ClassInfo {
         return false;
     }
 
+    public ClassInfo findMethodDeclarator(ClassInfo base, String name, String signature) {
+        while (base != null && !base.declaresMethod(name, signature)) {
+            for (ClassInfo c : base.getInterfaces()) {
+                if (c.declaresMethod(name, signature)) {
+                    return c;
+                }
+            }
+            base = base.getSuperClass();
+        }
+        return base;
+    }
+
     public Method findClinit() {
         for (Method m : clazz.getMethods()) {
             if (m.getName().equals("<clinit>")
@@ -312,7 +328,10 @@ public class ClassInfo {
         return null;
     }
 
-    private static void addMethodToList(List<Map.Entry<Method, ClassInfo>> list, Method m, ClassInfo ci, boolean replace) {
+    private List<Map.Entry<Method, ClassInfo>> instanceMethods;
+    private static Set<String> virtualMethods;
+
+    private void addMethodToList(List<Map.Entry<Method, ClassInfo>> list, Method m, ClassInfo ci, boolean replace) {
         boolean override = false;
         Map.Entry<Method, ClassInfo> entry = new AbstractMap.SimpleImmutableEntry<Method, ClassInfo>(m, ci);
 
@@ -324,6 +343,12 @@ public class ClassInfo {
                     list.set(i, entry);
                 }
                 override = true;
+
+                if (virtualMethods != null) {
+                    String methName = m.getName()+m.getSignature();                
+                    virtualMethods.add(oldEntry.getValue().getName()+"."+methName);
+                    virtualMethods.add(ci.getName()+"."+methName);
+                }
             }
         }
         if (!override) {
@@ -331,29 +356,43 @@ public class ClassInfo {
         }
     }
 
-    public List<Map.Entry<Method, ClassInfo>> getInstanceMethods() {
-        List<Map.Entry<Method, ClassInfo>> methods = new LinkedList<Map.Entry<Method, ClassInfo>>();
-
+    private void computeInstanceMethods() {
+        instanceMethods = new LinkedList<Map.Entry<Method, ClassInfo>>();
         ClassInfo superClass = getSuperClass();
         if (superClass != null) {
             List<Map.Entry<Method, ClassInfo>> supers = superClass.getInstanceMethods();
             for (Map.Entry<Method, ClassInfo> e : supers) {
-                addMethodToList(methods, e.getKey(), e.getValue(), true);
+                addMethodToList(instanceMethods, e.getKey(), e.getValue(), true);
             }
         }
         for (Method m : Filter.instances(getMethods())) {
             if (!m.isPrivate()) {
-                addMethodToList(methods, m, this, true);
+                addMethodToList(instanceMethods, m, this, true);
             }
         }
 
         for (ClassInfo i : getInterfaces()) {
             for (Method m : i.getMethods()) {
-                addMethodToList(methods, m, i, false);
+                addMethodToList(instanceMethods, m, i, false);
             }
         }
+    }
 
-        return methods;
+    public List<Map.Entry<Method, ClassInfo>> getInstanceMethods() {
+        if (instanceMethods == null) {
+            computeInstanceMethods();
+        }
+        return instanceMethods;
+    }
+
+    public Set<String> getVirtualMethods() {
+        if (virtualMethods == null) {
+            virtualMethods = new LinkedHashSet<String>();
+            for (ClassInfo ci : classInfoMap.values()) {
+                ci.computeInstanceMethods();
+            }
+        }
+        return virtualMethods;
     }
 
     public static boolean methodsEqual(Method a, Method b) {
@@ -361,14 +400,14 @@ public class ClassInfo {
             a.getSignature().equals(b.getSignature());
     }
 
-    public boolean needsInterfaceTable(List<Map.Entry<Method, ClassInfo>> instanceMethods) {
+    public boolean needsInterfaceTable() {
         if (clazz.isInterface() || clazz.isAbstract() || getInterfaces().isEmpty()) {
             return false;
         }
         for (ClassInfo i : interfaceList) {
             if (implementationOf(i)) {
                 for (Method m : i.getMethods()) {
-                    for (Map.Entry<Method, ClassInfo> e : instanceMethods) {
+                    for (Map.Entry<Method, ClassInfo> e : getInstanceMethods()) {
                         if (methodsEqual(m, e.getKey())) {
                             return true;
                         }
@@ -529,18 +568,20 @@ public class ClassInfo {
     }
 
     public static void dumpIfaceMethTabDef(PrintWriter out) {
-        out.println("typedef struct {");
-        for (ClassInfo i : interfaceList) {
-            out.println("\t/* interface "+i.getName()+" */");
-            for (Method m : i.getMethods()) {
-                out.print("\t"+getCType(m.getReturnType())+
-                          " (* const "+i.getCName()+"_"+getCMethName(m)+")");
-                dumpArgList(out, m);
-                out.println(";");
+        if (!interfaceList.isEmpty()) {
+            out.println("typedef struct {");
+            for (ClassInfo i : interfaceList) {
+                out.println("\t/* interface "+i.getName()+" */");
+                for (Method m : i.getMethods()) {
+                    out.print("\t"+getCType(m.getReturnType())+
+                              " (* const "+i.getCName()+"_"+getCMethName(m)+")");
+                    dumpArgList(out, m);
+                    out.println(";");
+                }
             }
+            out.println("} imtab_t;");
+            out.println();
         }
-        out.println("} imtab_t;");
-        out.println();
     }
 
     public void dumpDefs(PrintWriter out, Set<ClassInfo> dumped) {
@@ -567,8 +608,10 @@ public class ClassInfo {
         out.println("\tvoid * const super;");
         out.println("\tvoid * const elemtype;");
         out.println("\tvoid * const name;");
-        out.println("\tconst int32_t itab ["+((interfaceList.size()+31)/32)+"];");
-        out.println("\tconst imtab_t * const imtab;");
+        if (!interfaceList.isEmpty()) {
+            out.println("\tconst int32_t itab ["+((interfaceList.size()+31)/32)+"];");
+            out.println("\tconst imtab_t * const imtab;");
+        }
 
         dumpMethodPointerDefs(out);
         dumpStaticFieldDefs(out);
@@ -582,17 +625,24 @@ public class ClassInfo {
         out.println("\t/* method pointers */");
         for (Map.Entry<Method, ClassInfo> e : getInstanceMethods()) {
             Method m = e.getKey();
-            out.print("\t"+getCType(m.getReturnType())+
-                      " (* const "+getCMethName(m)+")");
-            dumpArgList(out, m);
-            out.println(";");
+            String fqName = e.getValue().getName()+"."+m.getName()+m.getSignature();
+            if (getVirtualMethods().contains(fqName)) {
+                out.print("\t"+getCType(m.getReturnType())+
+                          " (* const "+getCMethName(m)+")");
+                dumpArgList(out, m);
+                out.println(";");
+            }
         }
     }
 
     public void dumpStaticFieldDefs(PrintWriter out) {
         out.println("\t/* static fields */");
         for (Field f : Filter.statics(getFields())) {
-            out.println("\t"+getCType(f.getType())+" _S_"+f.getName()+";");
+            if (!(f.isFinal()
+                  && f.getType() instanceof BasicType
+                  && f.getConstantValue() != null)) {
+                out.println("\t"+getCType(f.getType())+" _S_"+getCFieldName(f.getName())+";");
+            }
         }
         out.println("} "+getCClassTypeName()+";");
         out.println();
@@ -601,6 +651,9 @@ public class ClassInfo {
     public void dumpMethodDefs(PrintWriter out) {
         out.println("/* method prototypes */");
         for (Method m : getMethods()) {
+            if (m.isPrivate() && !m.isNative()) {
+                out.print("static ");
+            }
             out.print(getCType(m.getReturnType())+
                       " "+getCName()+"_"+getCMethName(m));
             dumpArgList(out, m);
@@ -617,7 +670,7 @@ public class ClassInfo {
         out.println("\t/* instance fields */");
         int fieldIdx = 0;
         for (Field f : getInstanceFields()) {
-            out.println("\t"+getCType(f.getType())+" _"+fieldIdx+"_"+f.getName()+";");
+            out.println("\t"+getCType(f.getType())+" _"+fieldIdx+"_"+getCFieldName(f.getName())+";");
             fieldIdx++;
         }
         out.println("} "+getCObjTypeName()+";");        
@@ -631,18 +684,20 @@ public class ClassInfo {
     public void dumpBodies(PrintWriter out, Map<String, Integer> stringPool) {
         dumpMethodBodies(out, stringPool);
 
-        List<Map.Entry<Method, ClassInfo>> instanceMethods = getInstanceMethods();
-        if (needsInterfaceTable(instanceMethods)) {
-            dumpIfaceMethTab(out, instanceMethods);
+        if (needsInterfaceTable()) {
+            dumpIfaceMethTab(out);
         }
 
-        dumpClassBody(out, stringPool, instanceMethods);
+        dumpClassBody(out, stringPool);
     }
 
     public void dumpMethodBodies(PrintWriter out, Map<String, Integer> stringPool) {
         for (Method m : getMethods()) {
             Code code = m.getCode();
             if (code != null || m.isNative()) {
+                if (m.isPrivate() && !m.isNative()) {
+                    out.print("static ");
+                }
                 out.print(getCType(m.getReturnType())+
                           " "+getCName()+"_"+getCMethName(m));
                 dumpArgList(out, m);
@@ -658,14 +713,14 @@ public class ClassInfo {
         out.println();
     }
 
-    public void dumpIfaceMethTab(PrintWriter out, List<Map.Entry<Method, ClassInfo>> instanceMethods) {
+    public void dumpIfaceMethTab(PrintWriter out) {
         out.println("imtab_t "+getCName()+"_imtab = {");
         for (ClassInfo i : interfaceList) {
             out.println("\t/* interface "+i.getName()+" */");
             for (Method m : i.getMethods()) {
                 boolean found = false;
                 if (implementationOf(i)) {
-                    for (Map.Entry<Method, ClassInfo> e : instanceMethods) {
+                    for (Map.Entry<Method, ClassInfo> e : getInstanceMethods()) {
                         if (methodsEqual(m, e.getKey())) {
                             out.println("\t"+e.getValue().getCName()+"_"+getCMethName(m)+", ");
                             found = true;
@@ -681,7 +736,7 @@ public class ClassInfo {
         out.println("};");
     }
 
-    public void dumpClassBody(PrintWriter out, Map<String, Integer> stringPool, List<Map.Entry<Method, ClassInfo>> instanceMethods) {
+    public void dumpClassBody(PrintWriter out, Map<String, Integer> stringPool) {
         String classClassPtr = "&"+getClassInfo("java.lang.Class").getCName();
         ClassInfo superClass = getSuperClass();
         String superClassPtr = superClass != null ? "&"+superClass.getCName() : "0";
@@ -707,48 +762,53 @@ public class ClassInfo {
         out.println("\t"+superClassPtr+", /* super */");
         out.println("\t"+elemType+", /* elemtype */");
         out.println("\t"+namePtr+", /* name */");
-        out.println("\t/* interface table */");
-        out.print("\t{ ");
-        int buffer = 0;
-        int bufferCount = 0;
-        for (ClassInfo i : interfaceList) {
-            buffer |= (instanceOf(i) ? 1 : 0) << bufferCount;
-            bufferCount++;
-            if (bufferCount == 32) {
+        if (!interfaceList.isEmpty()) {
+            out.println("\t/* interface table */");
+            out.print("\t{ ");
+            int buffer = 0;
+            int bufferCount = 0;
+            for (ClassInfo i : interfaceList) {
+                buffer |= (instanceOf(i) ? 1 : 0) << bufferCount;
+                bufferCount++;
+                if (bufferCount == 32) {
+                    out.print(String.format("0x%08x", buffer)+", ");
+                    buffer = 0;
+                    bufferCount = 0;
+                }
+            }
+            if (bufferCount != 0) {
                 out.print(String.format("0x%08x", buffer)+", ");
-                buffer = 0;
-                bufferCount = 0;
+            }
+            out.println("},");
+
+            out.println("\t/* interface method table */");
+            if (needsInterfaceTable()) {
+                out.println("\t&"+getCName()+"_imtab,");
+            } else {
+                out.println("\t0,");
             }
         }
-        if (bufferCount != 0) {
-            out.print(String.format("0x%08x", buffer)+", ");
-        }
-        out.println("},");
 
-        out.println("\t/* interface method table */");
-        if (needsInterfaceTable(instanceMethods)) {
-            out.println("\t&"+getCName()+"_imtab,");
-        } else {
-            out.println("\t0,");
-        }
-
-        dumpMethodPointers(out, instanceMethods);
+        dumpMethodPointers(out);
         dumpStaticFields(out, stringPool);
 
         out.println("};");
         out.println();
     }
 
-    public void dumpMethodPointers(PrintWriter out, List<Map.Entry<Method, ClassInfo>> instanceMethods) {
+    public void dumpMethodPointers(PrintWriter out) {
         out.println("\t/* method pointers */");
-        for (Map.Entry<Method, ClassInfo> e : instanceMethods) {
+        for (Map.Entry<Method, ClassInfo> e : getInstanceMethods()) {
             Method m = e.getKey();
-            String className = e.getValue().getCName();
-            String methName = getCMethName(m);
-            if (m.getCode() != null || m.isNative()) {
-                out.println("\t"+className+"_"+methName+",");
-            } else {
-                out.println("\t0, /* "+className+"_"+methName+" */");
+            String fqName = e.getValue().getName()+"."+m.getName()+m.getSignature();
+            if (getVirtualMethods().contains(fqName)) {
+                String className = e.getValue().getCName();
+                String methName = getCMethName(m);
+                if (m.getCode() != null || m.isNative()) {
+                    out.println("\t"+className+"_"+methName+",");
+                } else {
+                    out.println("\t0, /* "+className+"_"+methName+" */");
+                }
             }
         }
     }
@@ -756,6 +816,11 @@ public class ClassInfo {
     public void dumpStaticFields(PrintWriter out, Map<String, Integer> stringPool) {
         out.println("\t/* static fields */");
         for (Field f : Filter.statics(getFields())) {
+            if (f.isFinal()
+                && f.getType() instanceof BasicType
+                && f.getConstantValue() != null) {
+                continue;
+            }
             ConstantValue cv = f.getConstantValue();
             out.print("\t("+getCType(f.getType())+")");
             if (cv != null) {
@@ -780,7 +845,7 @@ public class ClassInfo {
                     if (!stringPool.containsKey(strVal)) {
                         stringPool.put(strVal, stringPool.size());
                     }
-                    out.print("(int)&stringPool["+stringPool.get(strVal)+"]");
+                    out.print("(int32_t)&stringPool["+stringPool.get(strVal)+"]");
                     break;
                 default:
                     System.err.println("Invalid tag for ConstantValue: "+cv.getTag());
@@ -1231,7 +1296,7 @@ public class ClassInfo {
         case Constants.IFGT: case Constants.IF_ICMPGT:
         case Constants.IFLE: case Constants.IF_ICMPLE: {
             BranchInstruction bi = (BranchInstruction)i;
-            out.print("\tif ("+getComparison(i, depth)+")"+
+            out.print("\tif ("+getComparison(i, depth)+") "+
                       "goto L"+(pos + bi.getIndex())+";");
             break;
         }
@@ -1307,8 +1372,12 @@ public class ClassInfo {
         }
 
         case Constants.ATHROW: {
-            ATHROW at = (ATHROW)i;                
-            out.print("\t"+s(0)+" = "+s(depth)+";");
+            ATHROW at = (ATHROW)i;
+            if (depth != 0) {
+                out.print("\t"+s(0)+" = "+s(depth)+";");
+            } else {
+                out.print("\t");
+            }
             dumpThrow(out, method, code, pos);
             break;
         }
@@ -1383,10 +1452,10 @@ public class ClassInfo {
         int fieldIdx = ci.getFieldIndex(fieldName);
         if (gf.getFieldType(constPool).getSize() == 1) {
             dumpNPE(out, method, code, pos, depth);
-            out.print("\t"+s(depth)+" = jvm_getfield("+ci.getCObjTypeName()+", "+s(depth)+", "+fieldIdx+", "+fieldName+");");
+            out.print("\t"+s(depth)+" = jvm_getfield("+ci.getCObjTypeName()+", "+s(depth)+", "+fieldIdx+", "+getCFieldName(fieldName)+");");
         } else {
             dumpNPE(out, method, code, pos, depth);
-            out.print("\t{ int64_t a = jvm_getfield2("+ci.getCObjTypeName()+", "+s(depth)+", "+fieldIdx+", "+fieldName+");"+
+            out.print("\t{ int64_t a = jvm_getfield2("+ci.getCObjTypeName()+", "+s(depth)+", "+fieldIdx+", "+getCFieldName(fieldName)+");"+
                       " "+s(depth)+" = (int32_t)a;"+
                       " "+s(depth+1)+" = (int32_t)(a >> 32); }");
         }
@@ -1403,11 +1472,11 @@ public class ClassInfo {
         int fieldIdx = ci.getFieldIndex(fieldName);
         if (pf.getFieldType(constPool).getSize() == 1) {
             dumpNPE(out, method, code, pos, depth-1);
-            out.print("\tjvm_putfield("+ci.getCObjTypeName()+", "+s(depth-1)+", "+fieldIdx+", "+fieldName+", "+s(depth)+");");
+            out.print("\tjvm_putfield("+ci.getCObjTypeName()+", "+s(depth-1)+", "+fieldIdx+", "+getCFieldName(fieldName)+", "+s(depth)+");");
         } else {
             dumpNPE(out, method, code, pos, depth-2);
             out.print("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
-                      " jvm_putfield2("+ci.getCObjTypeName()+", "+s(depth-2)+", "+fieldIdx+", "+fieldName+", a); }");
+                      " jvm_putfield2("+ci.getCObjTypeName()+", "+s(depth-2)+", "+fieldIdx+", "+getCFieldName(fieldName)+", a); }");
         }
     }
 
@@ -1421,9 +1490,9 @@ public class ClassInfo {
             return;
         }
         if (gs.getFieldType(constPool).getSize() == 1) {
-            out.print("\t"+s(depth+1)+" = "+ci.getCName()+"._S_"+fieldName+";");
+            out.print("\t"+s(depth+1)+" = "+ci.getCName()+"._S_"+getCFieldName(fieldName)+";");
         } else {
-            out.print("\t{ int64_t a = "+ci.getCName()+"._S_"+fieldName+";"+
+            out.print("\t{ int64_t a = "+ci.getCName()+"._S_"+getCFieldName(fieldName)+";"+
                       " "+s(depth+1)+" = (int32_t)a;"+
                       " "+s(depth+2)+" = (int32_t)(a >> 32); }");
         }
@@ -1439,10 +1508,10 @@ public class ClassInfo {
             return;
         }
         if (ps.getFieldType(constPool).getSize() == 1) {
-            out.print("\t"+ci.getCName()+"._S_"+fieldName+" = "+s(depth)+";");
+            out.print("\t"+ci.getCName()+"._S_"+getCFieldName(fieldName)+" = "+s(depth)+";");
         } else {
             out.print("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
-                      " "+ci.getCName()+"._S_"+fieldName+" = a; }");
+                      " "+ci.getCName()+"._S_"+getCFieldName(fieldName)+" = a; }");
         }
     }
 
@@ -1498,7 +1567,7 @@ public class ClassInfo {
             dumpNotFound(out, "Class", type.toString());
             return;
         }
-        out.println("\t"+dstVal+" = jvm_alloc(&"+ci.getCName()+", sizeof("+ci.getCObjTypeName()+"), &exc);");
+        out.println("\t"+dstVal+" = (int32_t)jvm_alloc(&"+ci.getCName()+", sizeof("+ci.getCObjTypeName()+"), &exc);");
         out.print("\tif (exc != 0) { "+s(0)+" = exc; exc = 0;");
         dumpThrow(out, method, code, pos);
         out.print(" }");
@@ -1520,7 +1589,7 @@ public class ClassInfo {
         }
         String objType = ci.getCObjTypeName();
 
-        out.println("\t"+dstVal+" = jvm_alloc(&"+ci.getCName()+", sizeof("+objType+")+"+sizeVal+"*"+size+", &exc);");
+        out.println("\t"+dstVal+" = (int32_t)jvm_alloc(&"+ci.getCName()+", sizeof("+objType+")+"+sizeVal+"*"+size+", &exc);");
         out.print("\tif (exc != 0) { "+s(0)+" = exc; exc = 0;");
         dumpThrow(out, method, code, pos);
         out.println(" }");
@@ -1532,35 +1601,23 @@ public class ClassInfo {
 
         String name = ii.getMethodName(constPool);
         String signature = ii.getSignature(constPool);
-        String methName = escapeName(name+signature);
+        String methName = escapeName(name+signature);        
 
         String className = ii.getReferenceType(constPool).toString();
         ClassInfo ci = getClassInfo(className);
+        String fqName = ci.getName()+"."+name+signature;
         String typeName;
-        if (opcode == Constants.INVOKESTATIC ||
-            opcode == Constants.INVOKESPECIAL) {
-            while (ci != null && !ci.declaresMethod(name, signature)) {
-                ci = ci.getSuperClass();
-            }
+        if (opcode == Constants.INVOKESTATIC
+            || opcode == Constants.INVOKESPECIAL
+            || opcode == Constants.INVOKEINTERFACE
+            || (opcode == Constants.INVOKEVIRTUAL
+                && !getVirtualMethods().contains(fqName))) {
+            ci = findMethodDeclarator(ci, name, signature);
             if (ci == null) {
                 dumpNotFound(out, "Method", className+"."+name+signature);
                 return;
             }
             typeName = ci.getCName();
-        } else if (opcode == Constants.INVOKEINTERFACE) {                    
-            typeName = null;
-            if (ci != null) {
-                for (ClassInfo iface : ci.getInterfaces()) {
-                    if (ci.instanceOf(iface)
-                        && iface.declaresMethod(name, signature)) {
-                        typeName = iface.getCName();
-                        break;
-                    }
-                }
-            } else {
-                dumpNotFound(out, "Method", className+"."+name+signature);
-                return;
-            }
         } else {
             if (ci == null) {
                 dumpNotFound(out, "Method", className+"."+name+signature);
@@ -1589,10 +1646,12 @@ public class ClassInfo {
             }
         }
         if (opcode == Constants.INVOKESTATIC
-            || opcode == Constants.INVOKESPECIAL) {
+            || opcode == Constants.INVOKESPECIAL
+            || (opcode == Constants.INVOKEVIRTUAL
+                && !getVirtualMethods().contains(fqName))) {
             out.print(typeName+"_"+methName+"(");
         } else if (opcode == Constants.INVOKEINTERFACE) {
-            out.print("(("+ci.getCObjTypeName()+"*)"+s(depth-argCount+1)+")->type->imtab->"+typeName+"_"+methName+"(");
+            out.print("(("+ci.getCObjTypeName()+"*)"+s(depth-argCount+1)+")->type->imtab->"+typeName+"_"+methName+"("); 
         } else {
             out.print("(("+typeName+"*)"+s(depth-argCount+1)+")->type->"+methName+"(");
         }
@@ -1619,7 +1678,7 @@ public class ClassInfo {
 
     public void dumpABE(PrintWriter out, Method method, Code code, int pos, int depth, int idxdepth) {
         out.print("\tif ("+s(idxdepth)+" < 0 ||"+
-                  " "+s(idxdepth)+" >= jvm_getfield(_int___obj_t, "+s(depth)+", 0, length))"+
+                  " "+s(idxdepth)+" >= jvm_arrlength(_int___obj_t, "+s(depth)+"))"+
                   " { "+s(0)+" = (int32_t)&abExc;");
         dumpThrow(out, method, code, pos);
         out.println(" }");
@@ -1670,19 +1729,29 @@ public class ClassInfo {
         for (Map.Entry<String, Integer> e : stringPool.entrySet()) {
             String str = e.getKey();
             int index = e.getValue();
-            out.println("const "+arrci.getCObjTypeName()+" string_"+index+"_val = {");
+
+            out.println("const struct { ");
+            out.println("\t"+arrci.getCClassTypeName()+" *type;");
+            out.println("\tlock_t *lock;");
+            out.println("\t"+getCType(Type.INT)+" _0_length;");
+            if (str.length() > 0) {
+                out.println("\t"+getCType(Type.CHAR)+" _1_data["+str.length()+"];");
+            }
+            out.println("} string_"+index+"_val = {");
             out.println("\t&"+arrci.getCName()+", /* type */");
             out.println("\t0, /* lock */");
             out.println("\t"+str.length()+", /* length */");
-            String safeStr = str.replace("*/", "*\\/").replace("/*", "/\\*")
-                .replace("\t", "\\t").replace("\r", "\\r").replace("\n", "\\n");
-            out.println("\t{ /* data: \""+safeStr+"\" */");
-            out.print("\t\t");
-            for (int i = 0; i < str.length(); i++) {
-                out.print((int)str.charAt(i)+(i < str.length()-1 ? ", " : ""));
+            if (str.length() > 0) {
+                String safeStr = str.replace("*/", "*\\/").replace("/*", "/\\*")
+                    .replace("\t", "\\t").replace("\r", "\\r").replace("\n", "\\n");
+                out.println("\t{ /* data: \""+safeStr+"\" */");
+                out.print("\t\t");
+                for (int i = 0; i < str.length(); i++) {
+                    out.print((int)str.charAt(i)+(i < str.length()-1 ? ", " : ""));
+                }
+                out.println();
+                out.println("\t}");
             }
-            out.println();
-            out.println("\t}");
             out.println("};");
         }
 

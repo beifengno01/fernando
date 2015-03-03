@@ -121,14 +121,14 @@ void jvm_catch(int32_t exc) {
   exit(EXIT_FAILURE);
 }
 
-int32_t jvm_alloc(void *type, int32_t size, int32_t *exc) {
+int32_t *jvm_alloc(void *type, int32_t size, int32_t *exc) {
   int32_t *ptr = allocPtr;
   allocPtr += (size + 3) >> 2;
   if (allocPtr > allocEnd) {
     *exc = (int32_t)&omErr;
-    return 0;
+    return ptr;
   }
   memset(ptr, 0, (size + 3) & ~0x3);
   ((_java_lang_Object_obj_t*)ptr)->type = type;
-  return (int32_t)ptr;
+  return ptr;
 }

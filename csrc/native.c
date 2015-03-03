@@ -32,9 +32,10 @@
 
 #include "defs.h"
 #include "jvm.h"
+#include <time.h>
 
 int32_t _java_lang_Object_getClass__Ljava_lang_Class_(int32_t ref, int32_t *exc) {
-  return (int)((_java_lang_Object_obj_t *)ref)->type;
+  return (int32_t)((_java_lang_Object_obj_t *)ref)->type;
 }
 int32_t _java_lang_Object_hashCode__I(int32_t ref, int32_t *exc) {
   return ref;
@@ -44,8 +45,12 @@ int32_t _java_lang_Class_getName__Ljava_lang_String_(int32_t ref, int32_t *exc) 
   return (int32_t)((_java_lang_Object_class_t *)ref)->name;
 }
 
+int64_t _java_lang_System_currentTimeMillis__J(int32_t *exc) {
+  return clock()/(CLOCKS_PER_SEC/1000);
+}
+
 void _ferdl_io_NativeOutputStream_write_I_V(int32_t ref, int32_t b, int32_t *exc) {
-  int i;
+  int32_t i;
   uint16_t inbuf[1] = { (uint16_t)b };
   char outbuf[6];
   int32_t len = jvm_decode(inbuf, sizeof(inbuf), outbuf, sizeof(outbuf));

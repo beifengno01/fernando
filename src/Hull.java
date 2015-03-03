@@ -324,7 +324,7 @@ public class Hull extends EmptyVisitor {
         }
         Type [] types = Type.getArgumentTypes(signature);
         for (Type t : types) {
-            if(t instanceof ObjectType) {
+            if (t instanceof ObjectType) {
                 add(((ObjectType)t).getClassName());
             }
         }

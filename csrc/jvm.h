@@ -83,6 +83,6 @@ void jvm_catch(int32_t exc);
 #define jvm_arrstore2(TYPE, REF, IDX, VAL)      \
   ((TYPE *)REF)->_1_data[IDX] = VAL
 
-int32_t jvm_alloc(void *type, int32_t size, int32_t *exc);
+int32_t *jvm_alloc(void *type, int32_t size, int32_t *exc) __attribute__((returns_nonnull,malloc));
 
 #endif /* _JVM_H */
