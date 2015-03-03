@@ -18,14 +18,13 @@ APPSRCPATH=app/src
 APPOUTPATH=app/build
 APPCLASSPATH=${APPOUTPATH}/classes:${SDKOUTPATH}
 
-APP=HelloWorld
+APP=jbe/DoAll
 APPEXENAME=${APP}
 
 APPCSRC=$(shell find ${APPOUTPATH}/classes -name "*.c")
-APPCOBJ=$(patsubst %.c,%.o,${APPCSRC})
 
 CC=gcc
-CFLAGS=-m32 -O2 -g
+CFLAGS=-m32 -O3 -std=c99 -pedantic -Wall -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function -Wno-unused-but-set-variable -flto -fwhole-program
 
 all: build
 
@@ -43,7 +42,7 @@ ${SDKOUTPATH}/%.class: ${SDKSRCPATH}/%.java
 
 app: sdk
 	@mkdir -p ${APPOUTPATH}/classes
-	javac -d ${APPOUTPATH}/classes -bootclasspath "" -classpath ${APPCLASSPATH} ${APPSRCPATH}/${APP}.java
+	javac -d ${APPOUTPATH}/classes -bootclasspath "" -classpath ${APPCLASSPATH} -sourcepath ${APPSRCPATH} ${APPSRCPATH}/${APP}.java
 
 xlate: tool app
 	@mkdir -p ${APPOUTPATH}/classes
@@ -52,21 +51,11 @@ xlate: tool app
 build: xlate
 	${MAKE} ${APPOUTPATH}/${APPEXENAME}
 
-${APPOUTPATH}/main.c: xlate
-
-${APPOUTPATH}/libclasses.a: ${APPCOBJ}
-	ar cr $@ $^
-
-${APPOUTPATH}/${APPEXENAME}: ${APPOUTPATH}/main.o ${APPOUTPATH}/${NATIVE}.o ${APPOUTPATH}/${JVM}.o ${APPOUTPATH}/libclasses.a
+${APPOUTPATH}/${APPEXENAME}: ${APPOUTPATH}/main.c ${APPCSRC} ${CSRCPATH}/${NATIVE}.c ${CSRCPATH}/${JVM}.c
+	mkdir -p $(dir ${APPOUTPATH}/${APPEXENAME})
 	${CC} ${CFLAGS} -o $@ \
-	${APPOUTPATH}/main.o ${APPOUTPATH}/${NATIVE}.o ${APPOUTPATH}/${JVM}.o \
-	-L${APPOUTPATH} -lclasses -lm
-
-${APPOUTPATH}/%.o: ${CSRCPATH}/%.c
-	${CC} ${CFLAGS} -I ${CSRCPATH} -I ${APPOUTPATH} -c -o $@ $<
-
-%.o: %.c
-	${CC} ${CFLAGS} -I ${CSRCPATH} -I ${APPOUTPATH} -c -o $@ $<
+	-I ${CSRCPATH} -I ${APPOUTPATH} \
+	$^ -lm
 
 clean: cleantool cleanapp cleansdk
 
