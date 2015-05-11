@@ -30,6 +30,8 @@
    policies, either expressed or implied, of the copyright holder.
 */
 
+package fernando;
+
 import org.apache.bcel.Constants;
 import org.apache.bcel.Repository;
 import org.apache.bcel.classfile.Code;

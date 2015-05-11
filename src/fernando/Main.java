@@ -30,6 +30,8 @@
    policies, either expressed or implied, of the copyright holder.
 */
 
+package fernando;
+
 import org.apache.bcel.Repository;
 import org.apache.bcel.classfile.JavaClass;
 import org.apache.bcel.classfile.Method;
@@ -50,19 +52,15 @@ class ClassPath extends org.apache.bcel.util.ClassPath {
     }
 }
 
-public class Linker {
-    private Linker(String classPath) {
-        ClassPath cp = new ClassPath(classPath);
-        Repository.setRepository(SyntheticRepository.getInstance(cp));
-    }
-
+public class Main {
     public static void main(String [] args) {
         if (args.length != 3) {
-            System.err.println("Usage: java Linker <classpath> <mainclass> <file>");
+            System.err.println("Usage: java fernando.Main <classpath> <mainclass> <file>");
             System.exit(-1);
         }
 
-        Linker linker = new Linker(args[0]);
+        ClassPath cp = new ClassPath(args[0]);
+        Repository.setRepository(SyntheticRepository.getInstance(cp));
         ClassInfo.loadHull(args[1]);
         ClassInfo.dumpAll(args[2]);
     }

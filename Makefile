@@ -48,7 +48,7 @@ app: sdk
 
 xlate: tool app
 	@mkdir -p ${APPOUTPATH}/classes
-	java -classpath ${CLASSPATH} Linker ${APPCLASSPATH} ${APP} ${APPOUTPATH}
+	java -classpath ${CLASSPATH} fernando.Main ${APPCLASSPATH} ${APP} ${APPOUTPATH}
 
 build: xlate
 	${MAKE} ${APPOUTPATH}/${APPEXENAME}
