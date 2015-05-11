@@ -59,6 +59,9 @@ ${APPOUTPATH}/${APPEXENAME}: ${APPOUTPATH}/main.c ${APPCSRC} ${CSRCPATH}/${NATIV
 	-I ${CSRCPATH} -I ${APPOUTPATH} \
 	$^ -lm
 
+run:
+	./${APPOUTPATH}/${APPEXENAME}
+
 clean: cleantool cleanapp cleansdk
 
 cleantool:
@@ -70,4 +73,19 @@ cleanapp:
 cleansdk:
 	rm -rf ${SDKOUTPATH}
 
-.PHONY: all tool sdk app xlate build clean cleantool cleanapp cleansdk
+help:
+	@echo "Available make targets:"
+	@echo "all        build everything (default)"
+	@echo "tool       build C code generator"
+	@echo "sdk        build Java class library"
+	@echo "app        build Java application"
+	@echo "xlate      translate Java application to C code"
+	@echo "build      compile C code"
+	@echo "run        run application"
+	@echo "clean      clean everything"
+	@echo "cleantool  clean C code generator"
+	@echo "cleansdk   clean Java class library"
+	@echo "cleanapp   clean Java application and generated C code"
+	@echo "help       print this message"
+
+.PHONY: all tool sdk app xlate build run clean cleantool cleanapp cleansdk help
