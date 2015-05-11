@@ -35,9 +35,11 @@
 #include "defs.h"
 #include "jvm.h"
 #include <stdlib.h>
+#include <sys/time.h>
 #include <time.h>
 #include <pthread.h>
 #include <sched.h>
+#include <errno.h>
 
 int32_t _java_lang_Object_getClass__Ljava_lang_Class_(int32_t ref, int32_t *exc) {
   return (int32_t)((_java_lang_Object_obj_t *)ref)->type;
@@ -46,41 +48,77 @@ int32_t _java_lang_Object_hashCode__I(int32_t ref, int32_t *exc) {
   return ref;
 }
 
+void _java_lang_Object_wait__V(int32_t ref, int32_t *exc) {
+  _java_lang_Object_obj_t *obj = (_java_lang_Object_obj_t *)ref;
+  if (jvm_wait(obj)) {
+    *exc = (int32_t)&vmErr;
+  }
+}
+void _java_lang_Object_notify__V(int32_t ref, int32_t *exc) {
+  _java_lang_Object_obj_t *obj = (_java_lang_Object_obj_t *)ref;
+  if (jvm_notify(obj)) {
+    *exc = (int32_t)&vmErr;
+  }
+}
+void _java_lang_Object_notifyAll__V(int32_t ref, int32_t *exc) {
+  _java_lang_Object_obj_t *obj = (_java_lang_Object_obj_t *)ref;
+  if (jvm_notify_all(obj)) {
+    *exc = (int32_t)&vmErr;
+  }
+}
+
 int32_t _java_lang_Class_getName__Ljava_lang_String_(int32_t ref, int32_t *exc) {
   return (int32_t)((_java_lang_Object_class_t *)ref)->name;
 }
 
 int64_t _java_lang_System_currentTimeMillis__J(int32_t *exc) {
-  return clock()/(CLOCKS_PER_SEC/1000);
+  struct timeval time;
+  gettimeofday(&time, NULL);
+  return time.tv_sec*1000 + time.tv_usec/1000;
 }
 
-struct pthread_args_t {
+struct thread_args_t {
   int32_t ref;
   int32_t *exc;
 };
-void *pthread_wrapper(void *arg_ptr) {
-  struct pthread_args_t *args = (struct pthread_args_t *)arg_ptr;
-  _java_lang_Thread_obj_t *thread_ref = (_java_lang_Thread_obj_t *)args->ref;
-  thread_ref->type->run__V(args->ref, args->exc);
+static void *thread_wrapper(void *arg_ptr) {
+  struct thread_args_t *args = (struct thread_args_t *)arg_ptr;
+  _java_lang_Thread_obj_t *thread = (_java_lang_Thread_obj_t *)args->ref;
+  thread->type->run__V(args->ref, args->exc);
   free(args);
   return NULL;
 }
 
 void _java_lang_Thread_start__V(int32_t ref, int32_t *exc) {
   pthread_t *pthread = malloc(sizeof(pthread_t));
+  if (!pthread) {
+    *exc = (int32_t)&vmErr;
+    return;
+  }
+
   jvm_putfield(_java_lang_Thread_obj_t, ref, 0, _pthread, (int32_t)pthread);
 
-  struct pthread_args_t *args = malloc(sizeof(struct pthread_args_t));
+  struct thread_args_t *args = malloc(sizeof(struct thread_args_t));
+  if (!args) {
+    *exc = (int32_t)&vmErr;
+    return;
+  }
+
   args->ref = ref;
   args->exc = exc;
 
-  pthread_create(pthread, NULL, pthread_wrapper, args);
+  if (pthread_create(pthread, NULL, thread_wrapper, args)) {
+    *exc = (int32_t)&vmErr;
+    return;
+  }
 }
 
 void _java_lang_Thread_join__V(int32_t ref, int32_t *exc) {
   pthread_t *thread =
     (pthread_t *)jvm_getfield(_java_lang_Thread_obj_t, ref, 0, _pthread);
-  pthread_join(*thread, NULL);
+  if (pthread_join(*thread, NULL)) {
+    *exc = (int32_t)&vmErr;
+  }
   free(thread);
 }
 
@@ -91,7 +129,11 @@ void _java_lang_Thread_yield__V(int32_t *exc) {
 void _java_lang_Thread_sleep_J_V(int32_t lo, int32_t hi, int32_t *exc) {
   int64_t v = ((int64_t)hi << 32) | (uint32_t)lo;
   const struct timespec time = { v/1000, (v % 1000)*1000000 };
-  nanosleep(&time, NULL);
+  int retval = nanosleep(&time, NULL);
+  if (retval && errno == EINTR) {
+    *exc = (int32_t)&intrExc;
+    return;
+  }
 }
 
 void _ferdl_io_NativeOutputStream_write_I_V(int32_t ref, int32_t b, int32_t *exc) {

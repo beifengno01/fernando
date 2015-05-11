@@ -37,6 +37,10 @@ public class Object {
     public native Class getClass();
     public native int hashCode();
 
+    public native void wait();
+    public native void notify();
+    public native void notifyAll();
+
     public String toString() {
         return getClass().getName() + '@' + Integer.toHexString(hashCode());
     }

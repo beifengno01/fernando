@@ -32,28 +32,5 @@
 
 package java.lang;
 
-public class Thread implements Runnable {
-
-    private int _pthread;
-
-    private Runnable target;
-
-    public Thread(Runnable target) {
-        this.target = target;
-    }
-
-    public Thread() {
-        this(null);
-    }
-
-    public void run() {
-        if (target != null) {
-            target.run();
-        }
-    }
-
-    public native void start();
-    public native void join() throws InterruptedException;
-    public static native void yield();
-    public static native void sleep(long millis) throws InterruptedException;
+public class InterruptedException extends Exception {
 }

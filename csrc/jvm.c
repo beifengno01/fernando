@@ -37,6 +37,8 @@
 #include <pthread.h>
 #include "jvm.h"
 
+pthread_mutex_t globalLock = PTHREAD_MUTEX_INITIALIZER;
+
 int32_t *allocPtr;
 int32_t *allocEnd;
 
@@ -44,7 +46,9 @@ _java_lang_NullPointerException_obj_t npExc = { &_java_lang_NullPointerException
 _java_lang_ArrayIndexOutOfBoundsException_obj_t abExc = { &_java_lang_ArrayIndexOutOfBoundsException, 0, };
 _java_lang_ClassCastException_obj_t ccExc = { &_java_lang_ClassCastException, 0, };
 _java_lang_ArithmeticException_obj_t aeExc = { &_java_lang_ArithmeticException, 0, };
+_java_lang_InterruptedException_obj_t intrExc = { &_java_lang_InterruptedException, 0, };
 _java_lang_OutOfMemoryError_obj_t omErr = { &_java_lang_OutOfMemoryError, 0, };
+_java_lang_VirtualMachineError_obj_t vmErr = { &_java_lang_VirtualMachineError, 0, };
 
 void jvm_clinit(int32_t *exc) {
   const int heapSize = 256*1024;
@@ -63,27 +67,87 @@ void jvm_init(int32_t *retexc) {
   if (exc != 0) { *retexc = exc; return; }
   _java_lang_ArithmeticException__init___V((int32_t)&aeExc, &exc);
   if (exc != 0) { *retexc = exc; return; }
+  _java_lang_InterruptedException__init___V((int32_t)&intrExc, &exc);
+  if (exc != 0) { *retexc = exc; return; }
   _java_lang_OutOfMemoryError__init___V((int32_t)&omErr, &exc);
+  if (exc != 0) { *retexc = exc; return; }
+  _java_lang_VirtualMachineError__init___V((int32_t)&vmErr, &exc);
   if (exc != 0) { *retexc = exc; return; }
 }
 
-static pthread_mutex_t global_lock = PTHREAD_MUTEX_INITIALIZER;
-
-void jvm_lock(_java_lang_Object_obj_t *obj) {
+static int init_lock(_java_lang_Object_obj_t *obj) {
+  int retval = 0;
   if (obj->lock == NULL) {
-    pthread_mutex_lock(&global_lock);
+    if (pthread_mutex_lock(&globalLock)) {
+      return -1;
+    }
     if (obj->lock == NULL) {
       obj->lock = malloc(sizeof(pthread_mutex_t));
-      pthread_mutex_init(obj->lock, NULL);
+      if (obj->lock) {
+        retval = pthread_mutex_init(obj->lock, NULL);
+      } else {
+        retval = -1;
+      }
     }
-    pthread_mutex_unlock(&global_lock);
+    if (pthread_mutex_unlock(&globalLock)) {
+      return -1;
+    }
   }
-  
-  pthread_mutex_lock(obj->lock);
+  return retval;
 }
 
-void jvm_unlock(_java_lang_Object_obj_t *obj) {
-  pthread_mutex_unlock(obj->lock);
+int jvm_lock(_java_lang_Object_obj_t *ref) {
+  if (init_lock(ref)) {
+    return -1;
+  }
+  return pthread_mutex_lock(ref->lock);
+}
+
+int jvm_unlock(_java_lang_Object_obj_t *ref) {
+  if (!ref->lock) {
+    return -1;
+  }
+  return pthread_mutex_unlock(ref->lock);
+}
+
+static int init_wait(_java_lang_Object_obj_t *obj) {
+  int retval = 0;
+  if (obj->wait == NULL) {
+    if (pthread_mutex_lock(&globalLock)) {
+      return -1;
+    }
+    if (obj->wait == NULL) {
+      obj->wait = malloc(sizeof(pthread_cond_t));
+      if (obj->wait) {
+        retval = pthread_cond_init(obj->wait, NULL);
+      } else {
+        retval = -1;
+      }
+    }
+    if (pthread_mutex_unlock(&globalLock)) {
+      return -1;
+    }
+  }
+  return retval;
+}
+
+int jvm_wait(_java_lang_Object_obj_t *ref) {
+  if (init_wait(ref)) {
+    return -1;
+  }
+  return pthread_cond_wait(ref->wait, ref->lock);
+}
+int jvm_notify(_java_lang_Object_obj_t *ref) {
+  if (init_wait(ref)) {
+    return -1;
+  }
+  return pthread_cond_signal(ref->wait);
+}
+int jvm_notify_all(_java_lang_Object_obj_t *ref) {
+  if (init_wait(ref)) {
+    return -1;
+  }
+  return pthread_cond_broadcast(ref->wait);
 }
 
 int32_t jvm_instanceof(const _java_lang_Object_class_t *ref,
@@ -149,10 +213,10 @@ void jvm_catch(int32_t exc) {
 
 int32_t *jvm_alloc(void *type, int32_t size, int32_t *exc) {
 
-  pthread_mutex_lock(&global_lock);
+  pthread_mutex_lock(&globalLock);
   int32_t *ptr = allocPtr;
   allocPtr += (size + 3) >> 2;
-  pthread_mutex_unlock(&global_lock);
+  pthread_mutex_unlock(&globalLock);
 
   if (allocPtr > allocEnd) {
     *exc = (int32_t)&omErr;

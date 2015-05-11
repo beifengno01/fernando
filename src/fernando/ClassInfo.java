@@ -73,8 +73,6 @@ import org.apache.bcel.generic.IINC;
 import org.apache.bcel.generic.INSTANCEOF;
 import org.apache.bcel.generic.LDC;
 import org.apache.bcel.generic.LDC2_W;
-import org.apache.bcel.generic.MONITORENTER;
-import org.apache.bcel.generic.MONITOREXIT;
 import org.apache.bcel.generic.MULTIANEWARRAY;
 import org.apache.bcel.generic.NEW;
 import org.apache.bcel.generic.NEWARRAY;
@@ -119,12 +117,14 @@ public class ClassInfo {
         hull.add("[F");
         hull.add("[D");
         hull.add("java.lang.Class");
+        hull.add("java.lang.Thread");
         hull.add("java.lang.NullPointerException");
         hull.add("java.lang.ArrayIndexOutOfBoundsException");
         hull.add("java.lang.ClassCastException");
         hull.add("java.lang.ArithmeticException");
         hull.add("java.lang.OutOfMemoryError");
-        hull.add("java.lang.Thread");
+        hull.add("java.lang.InterruptedException");
+        hull.add("java.lang.VirtualMachineError");
 
         hull.add(entry);
         Map<String, JavaClass> classes = hull.resolve();
@@ -568,6 +568,7 @@ public class ClassInfo {
         out.println("#include <pthread.h>");
         out.println();
         out.println("typedef pthread_mutex_t lock_t;");
+        out.println("typedef pthread_cond_t wait_t;");
         out.println();
 
         dumpIfaceMethTabDef(out);
@@ -611,6 +612,7 @@ public class ClassInfo {
         out.println("\t/* header */");
         out.println("\tvoid * const type;");
         out.println("\tlock_t * lock;");
+        out.println("\twait_t * wait;");
         out.println("\t/* class type fields */");
         out.println("\tvoid * const super;");
         out.println("\tvoid * const elemtype;");
@@ -682,6 +684,7 @@ public class ClassInfo {
         out.println("\t/* header */");
         out.println("\tconst "+getCClassTypeName()+" *type;");
         out.println("\tlock_t *lock;");
+        out.println("\twait_t *wait;");
         out.println("\t/* instance fields */");
         int fieldIdx = 0;
         for (Field f : getInstanceFields()) {
@@ -780,6 +783,7 @@ public class ClassInfo {
         out.println("\t/* header */");
         out.println("\t"+classClassPtr+", /* type */");
         out.println("\t0, /* lock */");
+        out.println("\t0, /* wait */");
         out.println("\t"+superClassPtr+", /* super */");
         out.println("\t"+elemType+", /* elemtype */");
         out.println("\t"+namePtr+", /* name */");
@@ -917,7 +921,7 @@ public class ClassInfo {
 
         StackDepths depthMap = new StackDepths(il, constPool);
 
-        dumpSyncEnter(out, stringPool, method);
+        dumpSyncEnter(out, method, code, 0);
 
         for (InstructionHandle ih : il.getInstructionHandles()) {
             Instruction i = ih.getInstruction();
@@ -1350,17 +1354,17 @@ public class ClassInfo {
         }
 
         case Constants.RETURN:
-            dumpSyncReturn(out, stringPool, method);
+            dumpSyncReturn(out, method, code, pos);
             out.print("\treturn;");
             break;
         case Constants.ARETURN: case Constants.IRETURN: case Constants.FRETURN:
             out.println("\t{ int32_t a = "+s(depth)+";");
-            dumpSyncReturn(out, stringPool, method);
+            dumpSyncReturn(out, method, code, pos);
             out.print("\treturn "+s(depth)+"; }");
             break;
         case Constants.LRETURN: case Constants.DRETURN:
             out.println("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";");
-            dumpSyncReturn(out, stringPool, method);
+            dumpSyncReturn(out, method, code, pos);
             out.print("\treturn a; }");
             break;
 
@@ -1422,13 +1426,13 @@ public class ClassInfo {
         }
 
         case Constants.MONITORENTER: {
-            ClassInfo ci = getClassInfo("java.lang.Object");
-            out.print("\tjvm_lock(("+ci.getCObjTypeName()+" *)"+s(depth)+");");
+            dumpNPE(out, method, code, pos, depth);
+            dumpMonitorEnter(out, method, code, pos, depth);
             break;
         }
         case Constants.MONITOREXIT: {
-            ClassInfo ci = getClassInfo("java.lang.Object");
-            out.print("\tjvm_unlock(("+ci.getCObjTypeName()+" *)"+s(depth)+");");
+            dumpNPE(out, method, code, pos, depth);
+            dumpMonitorExit(out, method, code, pos, depth);
             break;
         }
 
@@ -1759,28 +1763,42 @@ public class ClassInfo {
         if (!caught) {
             Type retType = method.getReturnType();
             out.println();
-            out.print("\t*retexc = "+s(0)+"; return"+(retType != Type.VOID ? " 0" : "")+";");
+            out.println("\t*retexc = "+s(0)+";");
+            dumpSyncReturn(out, method, code, pos);
+            out.print("\treturn"+(retType != Type.VOID ? " 0" : "")+";");
         }
     }
 
-    public void dumpSyncEnter(PrintWriter out, Map<String, Integer> stringPool, Method method) {
+    public void dumpMonitorEnter(PrintWriter out, Method method, Code code, int pos, int depth) {
+        ClassInfo ci = getClassInfo("java.lang.Object");
+        out.print("\t{ int r = jvm_lock(("+ci.getCObjTypeName()+" *)"+s(depth)+");");
+        out.println(" if (unlikely(r)) jvm_catch((int32_t)&vmErr); }");
+    }
+
+    public void dumpMonitorExit(PrintWriter out, Method method, Code code, int pos, int depth) {
+        ClassInfo ci = getClassInfo("java.lang.Object");
+        out.print("\t{ int r = jvm_unlock(("+ci.getCObjTypeName()+" *)"+s(depth)+");");
+        out.println(" if (unlikely(r)) jvm_catch((int32_t)&vmErr); }");
+    }
+
+    public void dumpSyncEnter(PrintWriter out, Method method, Code code, int pos) {
         if (method.isSynchronized()) {
             if (method.isStatic()) {
                 out.println("\t"+s(0)+" = "+getCName()+";");
             } else {
                 out.println("\t"+s(0)+" = "+v(0)+";");
             }
-            dumpInstruction(out, stringPool, method, null, -1, new MONITORENTER(), 0);
+            dumpMonitorEnter(out, method, code, pos, 0);
         }
     }
-    public void dumpSyncReturn(PrintWriter out, Map<String, Integer> stringPool, Method method) {
+    public void dumpSyncReturn(PrintWriter out, Method method, Code code, int pos) {
         if (method.isSynchronized()) {            
             if (method.isStatic()) {
                 out.println("\t"+s(0)+" = "+getCName()+";");
             } else {
                 out.println("\t"+s(0)+" = "+v(0)+";");
             }
-            dumpInstruction(out, stringPool, method, null, -1, new MONITOREXIT(), 0);
+            dumpMonitorExit(out, method, code, pos, 0);
         }
     }
 
@@ -1793,6 +1811,7 @@ public class ClassInfo {
             out.println("const struct { ");
             out.println("\t"+arrci.getCClassTypeName()+" *type;");
             out.println("\tlock_t *lock;");
+            out.println("\twait_t *wait;");
             out.println("\t"+getCType(Type.INT)+" _0_length;");
             if (str.length() > 0) {
                 out.println("\t"+getCType(Type.CHAR)+" _1_data["+str.length()+"];");
@@ -1800,6 +1819,7 @@ public class ClassInfo {
             out.println("} string_"+index+"_val = {");
             out.println("\t&"+arrci.getCName()+", /* type */");
             out.println("\t0, /* lock */");
+            out.println("\t0, /* wait */");
             out.println("\t"+str.length()+", /* length */");
             if (str.length() > 0) {
                 String safeStr = str.replace("*/", "*\\/").replace("/*", "/\\*")
@@ -1820,6 +1840,7 @@ public class ClassInfo {
         for (int i = 0; i < stringPool.size(); i++) {
             out.println("{\t&"+strci.getCName()+", /* type */");
             out.println("\t0, /* lock */");
+            out.println("\t0, /* wait */");
             out.println("\t(int32_t)&string_"+i+"_val /* value */");
             out.println("},");
         }

@@ -34,7 +34,10 @@
 #define _JVM_H
 
 #include <stdint.h>
+#include <pthread.h>
 #include "defs.h"
+
+extern pthread_mutex_t globalLock;
 
 extern int32_t *allocPtr;
 
@@ -42,7 +45,9 @@ extern _java_lang_NullPointerException_obj_t npExc;
 extern _java_lang_ArrayIndexOutOfBoundsException_obj_t abExc;
 extern _java_lang_ClassCastException_obj_t ccExc;
 extern _java_lang_ArithmeticException_obj_t aeExc;
+extern _java_lang_InterruptedException_obj_t intrExc;
 extern _java_lang_OutOfMemoryError_obj_t omErr;
+extern _java_lang_VirtualMachineError_obj_t vmErr;
 
 extern _java_lang_String_obj_t stringPool[];
 
@@ -52,8 +57,13 @@ void jvm_init(int32_t *exc);
 int32_t jvm_decode(uint16_t *inbuf, int32_t inbytes, char *outbuf, int32_t outbytes);
 void jvm_catch(int32_t exc);
 
-void jvm_lock(_java_lang_Object_obj_t *obj);
-void jvm_unlock(_java_lang_Object_obj_t *obj);
+int jvm_lock(_java_lang_Object_obj_t *obj);
+int jvm_unlock(_java_lang_Object_obj_t *obj);
+
+int jvm_wait(_java_lang_Object_obj_t *obj);
+int jvm_notify(_java_lang_Object_obj_t *obj);
+int jvm_notify_all(_java_lang_Object_obj_t *obj);
+
 int32_t jvm_instanceof(const _java_lang_Object_class_t *ref,
                        const _java_lang_Object_class_t *type);
 
