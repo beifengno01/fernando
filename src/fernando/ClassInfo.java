@@ -73,6 +73,8 @@ import org.apache.bcel.generic.IINC;
 import org.apache.bcel.generic.INSTANCEOF;
 import org.apache.bcel.generic.LDC;
 import org.apache.bcel.generic.LDC2_W;
+import org.apache.bcel.generic.MONITORENTER;
+import org.apache.bcel.generic.MONITOREXIT;
 import org.apache.bcel.generic.MULTIANEWARRAY;
 import org.apache.bcel.generic.NEW;
 import org.apache.bcel.generic.NEWARRAY;
@@ -122,6 +124,7 @@ public class ClassInfo {
         hull.add("java.lang.ClassCastException");
         hull.add("java.lang.ArithmeticException");
         hull.add("java.lang.OutOfMemoryError");
+        hull.add("java.lang.Thread");
 
         hull.add(entry);
         Map<String, JavaClass> classes = hull.resolve();
@@ -562,8 +565,9 @@ public class ClassInfo {
         out.println("#include <stdint.h>");
         out.println("#include <string.h>");
         out.println("#include <math.h>");
+        out.println("#include <pthread.h>");
         out.println();
-        out.println("typedef int lock_t;");
+        out.println("typedef pthread_mutex_t lock_t;");
         out.println();
 
         dumpIfaceMethTabDef(out);
@@ -649,6 +653,9 @@ public class ClassInfo {
                 && !(f.isFinal()
                      && f.getType() instanceof BasicType
                      && f.getConstantValue() != null)) {
+                if (f.isVolatile()) {
+                    out.print("volatile ");
+                }
                 out.println("extern "+getCType(f.getType())+
                             " "+getCName()+"_"+getCFieldName(f.getName())+";");
             }
@@ -678,7 +685,12 @@ public class ClassInfo {
         out.println("\t/* instance fields */");
         int fieldIdx = 0;
         for (Field f : getInstanceFields()) {
-            out.println("\t"+getCType(f.getType())+" _"+fieldIdx+"_"+getCFieldName(f.getName())+";");
+            if (f.isVolatile()) {
+                out.print("\tvolatile ");
+            } else {
+                out.print("\t");
+            }
+            out.println(getCType(f.getType())+" _"+fieldIdx+"_"+getCFieldName(f.getName())+";");
             fieldIdx++;
         }
         out.println("} "+getCObjTypeName()+";");
@@ -832,6 +844,10 @@ public class ClassInfo {
                 continue;
             }
 
+            if (f.isVolatile()) {
+                out.print("volatile ");
+            }
+
             if (f.isPrivate()) {
                 out.print("static ");
             }
@@ -900,6 +916,8 @@ public class ClassInfo {
         }
 
         StackDepths depthMap = new StackDepths(il, constPool);
+
+        dumpSyncEnter(out, stringPool, method);
 
         for (InstructionHandle ih : il.getInstructionHandles()) {
             Instruction i = ih.getInstruction();
@@ -1332,14 +1350,18 @@ public class ClassInfo {
         }
 
         case Constants.RETURN:
+            dumpSyncReturn(out, stringPool, method);
             out.print("\treturn;");
             break;
         case Constants.ARETURN: case Constants.IRETURN: case Constants.FRETURN:
-            out.print("\treturn "+s(depth)+";");
+            out.println("\t{ int32_t a = "+s(depth)+";");
+            dumpSyncReturn(out, stringPool, method);
+            out.print("\treturn "+s(depth)+"; }");
             break;
         case Constants.LRETURN: case Constants.DRETURN:
-            out.print("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
-                      " return a; }");
+            out.println("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";");
+            dumpSyncReturn(out, stringPool, method);
+            out.print("\treturn a; }");
             break;
 
         case Constants.NEW: {
@@ -1401,12 +1423,12 @@ public class ClassInfo {
 
         case Constants.MONITORENTER: {
             ClassInfo ci = getClassInfo("java.lang.Object");
-            out.print("\tjvm_lock((("+ci.getCObjTypeName()+" *)"+s(depth)+")->lock);");
+            out.print("\tjvm_lock(("+ci.getCObjTypeName()+" *)"+s(depth)+");");
             break;
         }
         case Constants.MONITOREXIT: {
             ClassInfo ci = getClassInfo("java.lang.Object");
-            out.print("\tjvm_unlock((("+ci.getCObjTypeName()+" *)"+s(depth)+")->lock);");
+            out.print("\tjvm_unlock(("+ci.getCObjTypeName()+" *)"+s(depth)+");");
             break;
         }
 
@@ -1741,6 +1763,27 @@ public class ClassInfo {
         }
     }
 
+    public void dumpSyncEnter(PrintWriter out, Map<String, Integer> stringPool, Method method) {
+        if (method.isSynchronized()) {
+            if (method.isStatic()) {
+                out.println("\t"+s(0)+" = "+getCName()+";");
+            } else {
+                out.println("\t"+s(0)+" = "+v(0)+";");
+            }
+            dumpInstruction(out, stringPool, method, null, -1, new MONITORENTER(), 0);
+        }
+    }
+    public void dumpSyncReturn(PrintWriter out, Map<String, Integer> stringPool, Method method) {
+        if (method.isSynchronized()) {            
+            if (method.isStatic()) {
+                out.println("\t"+s(0)+" = "+getCName()+";");
+            } else {
+                out.println("\t"+s(0)+" = "+v(0)+";");
+            }
+            dumpInstruction(out, stringPool, method, null, -1, new MONITOREXIT(), 0);
+        }
+    }
+
     public static void dumpStringPool(PrintWriter out, Map<String, Integer> stringPool) {
         ClassInfo arrci = getClassInfo("char[]");
         for (Map.Entry<String, Integer> e : stringPool.entrySet()) {
@@ -1804,7 +1847,7 @@ public class ClassInfo {
         out.println("\t"+entry.getCName()+"_main__Ljava_lang_String__V(0, &exc);");
 
         out.println("\tif (exc != 0) { jvm_catch(exc); }");
-        out.println("\treturn 0;");
+        out.println("\tpthread_exit(NULL);");
         out.println("}");
     }
 

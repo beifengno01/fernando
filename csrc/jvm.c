@@ -34,6 +34,7 @@
 #include <stdio.h>
 #include <locale.h>
 #include <iconv.h>
+#include <pthread.h>
 #include "jvm.h"
 
 int32_t *allocPtr;
@@ -66,10 +67,23 @@ void jvm_init(int32_t *retexc) {
   if (exc != 0) { *retexc = exc; return; }
 }
 
-void jvm_lock(lock_t *l) {
+static pthread_mutex_t global_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void jvm_lock(_java_lang_Object_obj_t *obj) {
+  if (obj->lock == NULL) {
+    pthread_mutex_lock(&global_lock);
+    if (obj->lock == NULL) {
+      obj->lock = malloc(sizeof(pthread_mutex_t));
+      pthread_mutex_init(obj->lock, NULL);
+    }
+    pthread_mutex_unlock(&global_lock);
+  }
+  
+  pthread_mutex_lock(obj->lock);
 }
 
-void jvm_unlock(lock_t *l) {
+void jvm_unlock(_java_lang_Object_obj_t *obj) {
+  pthread_mutex_unlock(obj->lock);
 }
 
 int32_t jvm_instanceof(const _java_lang_Object_class_t *ref,
@@ -134,8 +148,12 @@ void jvm_catch(int32_t exc) {
 }
 
 int32_t *jvm_alloc(void *type, int32_t size, int32_t *exc) {
+
+  pthread_mutex_lock(&global_lock);
   int32_t *ptr = allocPtr;
   allocPtr += (size + 3) >> 2;
+  pthread_mutex_unlock(&global_lock);
+
   if (allocPtr > allocEnd) {
     *exc = (int32_t)&omErr;
     return ptr;

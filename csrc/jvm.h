@@ -52,8 +52,8 @@ void jvm_init(int32_t *exc);
 int32_t jvm_decode(uint16_t *inbuf, int32_t inbytes, char *outbuf, int32_t outbytes);
 void jvm_catch(int32_t exc);
 
-void jvm_lock(lock_t *l);
-void jvm_unlock(lock_t *l);
+void jvm_lock(_java_lang_Object_obj_t *obj);
+void jvm_unlock(_java_lang_Object_obj_t *obj);
 int32_t jvm_instanceof(const _java_lang_Object_class_t *ref,
                        const _java_lang_Object_class_t *type);
 

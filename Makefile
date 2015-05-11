@@ -57,7 +57,7 @@ ${APPOUTPATH}/${APPEXENAME}: ${APPOUTPATH}/main.c ${APPCSRC} ${CSRCPATH}/${NATIV
 	mkdir -p $(dir ${APPOUTPATH}/${APPEXENAME})
 	${CC} ${CFLAGS} -o $@ \
 	-I ${CSRCPATH} -I ${APPOUTPATH} \
-	$^ -lm
+	$^ -lm -lpthread
 
 run:
 	./${APPOUTPATH}/${APPEXENAME}

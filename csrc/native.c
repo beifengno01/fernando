@@ -30,9 +30,14 @@
    policies, either expressed or implied, of the copyright holder.
 */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include "defs.h"
 #include "jvm.h"
+#include <stdlib.h>
 #include <time.h>
+#include <pthread.h>
+#include <sched.h>
 
 int32_t _java_lang_Object_getClass__Ljava_lang_Class_(int32_t ref, int32_t *exc) {
   return (int32_t)((_java_lang_Object_obj_t *)ref)->type;
@@ -47,6 +52,46 @@ int32_t _java_lang_Class_getName__Ljava_lang_String_(int32_t ref, int32_t *exc) 
 
 int64_t _java_lang_System_currentTimeMillis__J(int32_t *exc) {
   return clock()/(CLOCKS_PER_SEC/1000);
+}
+
+struct pthread_args_t {
+  int32_t ref;
+  int32_t *exc;
+};
+void *pthread_wrapper(void *arg_ptr) {
+  struct pthread_args_t *args = (struct pthread_args_t *)arg_ptr;
+  _java_lang_Thread_obj_t *thread_ref = (_java_lang_Thread_obj_t *)args->ref;
+  thread_ref->type->run__V(args->ref, args->exc);
+  free(args);
+  return NULL;
+}
+
+void _java_lang_Thread_start__V(int32_t ref, int32_t *exc) {
+  pthread_t *pthread = malloc(sizeof(pthread_t));
+  jvm_putfield(_java_lang_Thread_obj_t, ref, 0, _pthread, (int32_t)pthread);
+
+  struct pthread_args_t *args = malloc(sizeof(struct pthread_args_t));
+  args->ref = ref;
+  args->exc = exc;
+
+  pthread_create(pthread, NULL, pthread_wrapper, args);
+}
+
+void _java_lang_Thread_join__V(int32_t ref, int32_t *exc) {
+  pthread_t *thread =
+    (pthread_t *)jvm_getfield(_java_lang_Thread_obj_t, ref, 0, _pthread);
+  pthread_join(*thread, NULL);
+  free(thread);
+}
+
+void _java_lang_Thread_yield__V(int32_t *exc) {
+  sched_yield();
+}
+
+void _java_lang_Thread_sleep_J_V(int32_t lo, int32_t hi, int32_t *exc) {
+  int64_t v = ((int64_t)hi << 32) | (uint32_t)lo;
+  const struct timespec time = { v/1000, (v % 1000)*1000000 };
+  nanosleep(&time, NULL);
 }
 
 void _ferdl_io_NativeOutputStream_write_I_V(int32_t ref, int32_t b, int32_t *exc) {
