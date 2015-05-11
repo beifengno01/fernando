@@ -157,3 +157,40 @@ int32_t _java_lang_String_fillDoubleValue__BD_I(int32_t buf, int32_t lo, int32_t
   char *b = (char *)&((_byte___obj_t *)buf)->_1_data;
   return sprintf(b, "%g", *d);
 }
+
+#define MATHFUN1(FUN)                                                    \
+  int64_t _java_lang_Math_##FUN##_D_D(int32_t lo, int32_t hi, int32_t *exc) { \
+    int64_t v = ((int64_t) hi << 32) | (uint32_t)lo;                    \
+    double *d = (double *)&v;                                           \
+    *d = FUN(*d);                                                       \
+    return v;                                                           \
+  }
+MATHFUN1(asin)
+MATHFUN1(acos)
+MATHFUN1(atan)
+MATHFUN1(sin)
+MATHFUN1(cos)
+MATHFUN1(tan)
+MATHFUN1(sinh)
+MATHFUN1(cosh)
+MATHFUN1(tanh)
+MATHFUN1(sqrt)
+MATHFUN1(cbrt)
+MATHFUN1(exp)
+MATHFUN1(expm1)
+MATHFUN1(log)
+MATHFUN1(log10)
+MATHFUN1(log1p)
+
+#define MATHFUN2(FUN)                                                   \
+  int64_t _java_lang_Math_##FUN##_DD_D(int32_t lo1, int32_t hi1, int32_t lo2, int32_t hi2, int32_t *exc) { \
+    int64_t v1 = ((int64_t) hi1 << 32) | (uint32_t)lo1;                 \
+    double *d1 = (double *)&v1;                                         \
+    int64_t v2 = ((int64_t) hi2 << 32) | (uint32_t)lo2;                 \
+    double *d2 = (double *)&v2;                                         \
+    *d1 = FUN(*d1, *d2);                                                \
+    return v1;                                                          \
+  }
+MATHFUN2(atan2)
+MATHFUN2(pow)
+MATHFUN2(hypot)
