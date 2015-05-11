@@ -54,15 +54,15 @@ void jvm_clinit(int32_t *exc) {
 
 void jvm_init(int32_t *retexc) {
   int32_t exc = 0;
-  _java_lang_NullPointerException._init___V((int32_t)&npExc, &exc);
+  _java_lang_NullPointerException__init___V((int32_t)&npExc, &exc);
   if (exc != 0) { *retexc = exc; return; }
-  _java_lang_ArrayIndexOutOfBoundsException._init___V((int32_t)&abExc, &exc);
+  _java_lang_ArrayIndexOutOfBoundsException__init___V((int32_t)&abExc, &exc);
   if (exc != 0) { *retexc = exc; return; }
-  _java_lang_ClassCastException._init___V((int32_t)&ccExc, &exc);
+  _java_lang_ClassCastException__init___V((int32_t)&ccExc, &exc);
   if (exc != 0) { *retexc = exc; return; }
-  _java_lang_ArithmeticException._init___V((int32_t)&aeExc, &exc);
+  _java_lang_ArithmeticException__init___V((int32_t)&aeExc, &exc);
   if (exc != 0) { *retexc = exc; return; }
-  _java_lang_OutOfMemoryError._init___V((int32_t)&omErr, &exc);
+  _java_lang_OutOfMemoryError__init___V((int32_t)&omErr, &exc);
   if (exc != 0) { *retexc = exc; return; }
 }
 
@@ -87,6 +87,17 @@ int32_t jvm_instanceof(const _java_lang_Object_class_t *ref,
 }
 
 int32_t jvm_decode(uint16_t *inbuf, int32_t inbytes, char *outbuf, int32_t outbytes) {
+#ifdef __patmos__ /* no implementation of iconv on Patmos */
+  int32_t i;
+  for (i = 0; i < inbytes/sizeof(inbuf[0]); i++) {
+    if (inbuf[i] < 0x7f) {
+      outbuf[i] = inbuf[i];
+    } else {
+      outbuf[i] = '?';
+    }
+  }
+  return inbytes/sizeof(inbuf[0]);
+#else
   iconv_t conv = iconv_open("//TRANSLIT", "UTF-16//");
   int32_t maxbytes = outbytes;
   int32_t len = iconv(conv, (char **)&inbuf, (size_t *)&inbytes,
@@ -97,6 +108,7 @@ int32_t jvm_decode(uint16_t *inbuf, int32_t inbytes, char *outbuf, int32_t outby
   } else {
     return maxbytes-outbytes;
   }
+#endif
 }
 
 void jvm_catch(int32_t exc) {

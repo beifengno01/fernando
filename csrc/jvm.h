@@ -49,19 +49,18 @@ extern _java_lang_String_obj_t stringPool[];
 void jvm_clinit(int32_t *exc);
 void jvm_init(int32_t *exc);
 
+int32_t jvm_decode(uint16_t *inbuf, int32_t inbytes, char *outbuf, int32_t outbytes);
+void jvm_catch(int32_t exc);
+
 void jvm_lock(lock_t *l);
 void jvm_unlock(lock_t *l);
 int32_t jvm_instanceof(const _java_lang_Object_class_t *ref,
                        const _java_lang_Object_class_t *type);
 
-int32_t jvm_decode(uint16_t *inbuf, int32_t inbytes, char *outbuf, int32_t outbytes);
-void jvm_catch(int32_t exc);
-
-
 #define jvm_getfield(TYPE, REF, IDX, NAME)      \
-  ((TYPE *)REF)->_ ## IDX ## _ ## NAME
+  ((const TYPE *)REF)->_ ## IDX ## _ ## NAME
 #define jvm_getfield2(TYPE, REF, IDX, NAME)     \
-  ((TYPE *)REF)->_ ## IDX ## _ ## NAME
+  ((const TYPE *)REF)->_ ## IDX ## _ ## NAME
 
 #define jvm_putfield(TYPE, REF, IDX, NAME, VAL) \
   ((TYPE *)REF)->_ ## IDX ## _ ## NAME = VAL
@@ -69,20 +68,34 @@ void jvm_catch(int32_t exc);
   ((TYPE *)REF)->_ ## IDX ## _ ## NAME = VAL
 
 #define jvm_arrlength(TYPE, REF)                \
-  ((TYPE *)REF)->_0_length
+  ((const TYPE *)REF)->_0_length
 #define jvm_setarrlength(TYPE, REF, VAL)        \
   ((TYPE *)REF)->_0_length = VAL
 
 #define jvm_arrload(TYPE, REF, IDX)             \
-  ((TYPE *)REF)->_1_data[IDX]
+  (&((const TYPE *)REF)->_1_data[0])[IDX]
 #define jvm_arrload2(TYPE, REF, IDX)            \
-  ((TYPE *)REF)->_1_data[IDX]
+  (&((const TYPE *)REF)->_1_data[0])[IDX]
 
 #define jvm_arrstore(TYPE, REF, IDX, VAL)       \
-  ((TYPE *)REF)->_1_data[IDX] = VAL
+  (&((TYPE *)REF)->_1_data[0])[IDX] = VAL
 #define jvm_arrstore2(TYPE, REF, IDX, VAL)      \
-  ((TYPE *)REF)->_1_data[IDX] = VAL
+  (&((TYPE *)REF)->_1_data[0])[IDX] = VAL
 
-int32_t *jvm_alloc(void *type, int32_t size, int32_t *exc) __attribute__((returns_nonnull,malloc));
+#if defined(__gcc__)
+#define ALLOC_ATTRIBS __attribute__((returns_nonnull,malloc))
+#elif defined(__clang__)
+#define ALLOC_ATTRIBS __attribute__((malloc))
+#else
+#define ALLOC_ATTRIBS
+#endif
+
+int32_t *jvm_alloc(void *type, int32_t size, int32_t *exc) ALLOC_ATTRIBS;
+
+#if defined(__gcc__) || defined(__clang__)
+#define unlikely(cond) __builtin_expect(cond, 0)
+#else
+#define unlikely(cond) cond
+#endif
 
 #endif /* _JVM_H */

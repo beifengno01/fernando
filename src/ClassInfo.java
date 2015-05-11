@@ -549,7 +549,7 @@ public class ClassInfo {
         for (int i = 0; i < argCount; i++) {
             out.print("int32_t "+v(i)+", ");
         }
-        out.print("int32_t *retexc)");
+        out.print("int32_t *restrict retexc)");
     }
 
     public static void dumpStartDefs(PrintWriter out) {
@@ -595,6 +595,7 @@ public class ClassInfo {
         dumped.add(this);
 
         dumpClassDef(out);
+        dumpStaticFieldDefs(out);
         dumpMethodDefs(out);
         dumpObjectDef(out);
     }
@@ -614,7 +615,9 @@ public class ClassInfo {
         }
 
         dumpMethodPointerDefs(out);
-        dumpStaticFieldDefs(out);
+ 
+        out.println("} "+getCClassTypeName()+";");
+        out.println();
 
         out.println("/* forward definition of class object */");
         out.println("extern "+getCClassTypeName()+" "+getCName()+";");
@@ -626,7 +629,9 @@ public class ClassInfo {
         for (Map.Entry<Method, ClassInfo> e : getInstanceMethods()) {
             Method m = e.getKey();
             String fqName = e.getValue().getName()+"."+m.getName()+m.getSignature();
-            if (getVirtualMethods().contains(fqName)) {
+            if (getVirtualMethods().contains(fqName)
+                && !(m.getName().equals("<init>")
+                     && m.getSignature().equals("()V"))) {
                 out.print("\t"+getCType(m.getReturnType())+
                           " (* const "+getCMethName(m)+")");
                 dumpArgList(out, m);
@@ -636,15 +641,16 @@ public class ClassInfo {
     }
 
     public void dumpStaticFieldDefs(PrintWriter out) {
-        out.println("\t/* static fields */");
+        out.println("/* static fields */");
         for (Field f : Filter.statics(getFields())) {
-            if (!(f.isFinal()
-                  && f.getType() instanceof BasicType
-                  && f.getConstantValue() != null)) {
-                out.println("\t"+getCType(f.getType())+" _S_"+getCFieldName(f.getName())+";");
+            if (!f.isPrivate()
+                && !(f.isFinal()
+                     && f.getType() instanceof BasicType
+                     && f.getConstantValue() != null)) {
+                out.println("extern "+getCType(f.getType())+
+                            " "+getCName()+"_"+getCFieldName(f.getName())+";");
             }
         }
-        out.println("} "+getCClassTypeName()+";");
         out.println();
     }
 
@@ -673,7 +679,7 @@ public class ClassInfo {
             out.println("\t"+getCType(f.getType())+" _"+fieldIdx+"_"+getCFieldName(f.getName())+";");
             fieldIdx++;
         }
-        out.println("} "+getCObjTypeName()+";");        
+        out.println("} "+getCObjTypeName()+";");
         out.println();
     }
 
@@ -682,6 +688,7 @@ public class ClassInfo {
     }
 
     public void dumpBodies(PrintWriter out, Map<String, Integer> stringPool) {
+        dumpStaticFields(out, stringPool);
         dumpMethodBodies(out, stringPool);
 
         if (needsInterfaceTable()) {
@@ -790,7 +797,6 @@ public class ClassInfo {
         }
 
         dumpMethodPointers(out);
-        dumpStaticFields(out, stringPool);
 
         out.println("};");
         out.println();
@@ -801,7 +807,9 @@ public class ClassInfo {
         for (Map.Entry<Method, ClassInfo> e : getInstanceMethods()) {
             Method m = e.getKey();
             String fqName = e.getValue().getName()+"."+m.getName()+m.getSignature();
-            if (getVirtualMethods().contains(fqName)) {
+            if (getVirtualMethods().contains(fqName)
+                && !(m.getName().equals("<init>")
+                     && m.getSignature().equals("()V"))) {
                 String className = e.getValue().getCName();
                 String methName = getCMethName(m);
                 if (m.getCode() != null || m.isNative()) {
@@ -814,29 +822,36 @@ public class ClassInfo {
     }
 
     public void dumpStaticFields(PrintWriter out, Map<String, Integer> stringPool) {
-        out.println("\t/* static fields */");
+        out.println("/* static fields */");
         for (Field f : Filter.statics(getFields())) {
             if (f.isFinal()
                 && f.getType() instanceof BasicType
                 && f.getConstantValue() != null) {
                 continue;
             }
+
+            if (f.isPrivate()) {
+                out.print("static ");
+            }
+
+            out.print(getCType(f.getType())+
+                      " "+getCName()+"_"+getCFieldName(f.getName())+" = ");
             ConstantValue cv = f.getConstantValue();
-            out.print("\t("+getCType(f.getType())+")");
+            out.print("("+getCType(f.getType())+")");
             if (cv != null) {
                 Constant c = cv.getConstantPool().getConstant(cv.getConstantValueIndex());
                 switch (c.getTag()) {
                 case Constants.CONSTANT_Integer:
-                    out.print(((ConstantInteger) c).getBytes()+"UL");
+                    out.println(((ConstantInteger) c).getBytes()+"UL;");
                     break;
                 case Constants.CONSTANT_Long:
-                    out.print(((ConstantLong) c).getBytes()+"ULL");
+                    out.println(((ConstantLong) c).getBytes()+"ULL;");
                     break;
                 case Constants.CONSTANT_Float:
-                    out.print(Float.floatToIntBits(((ConstantFloat) c).getBytes())+"UL");
+                    out.println(Float.floatToIntBits(((ConstantFloat) c).getBytes())+"UL;");
                     break;
                 case Constants.CONSTANT_Double:
-                    out.print(Double.doubleToLongBits(((ConstantDouble) c).getBytes())+"ULL");
+                    out.println(Double.doubleToLongBits(((ConstantDouble) c).getBytes())+"ULL;");
                     break;
                 case Constants.CONSTANT_String:
                     int i = ((ConstantString)c).getStringIndex();
@@ -845,17 +860,17 @@ public class ClassInfo {
                     if (!stringPool.containsKey(strVal)) {
                         stringPool.put(strVal, stringPool.size());
                     }
-                    out.print("(int32_t)&stringPool["+stringPool.get(strVal)+"]");
+                    out.println("(int32_t)&stringPool["+stringPool.get(strVal)+"];");
                     break;
                 default:
                     System.err.println("Invalid tag for ConstantValue: "+cv.getTag());
                     System.exit(-1);
                 }
             } else {
-                out.print("0");
+                out.println("0;");
             }
-            out.println(", /* "+f.getName()+" */");
         }
+        out.println();
     }
 
     private static String s(int depth) {
@@ -1033,7 +1048,7 @@ public class ClassInfo {
             out.print("\t"+s(depth-1)+" "+getArithOp(i)+"= "+s(depth)+";");
             break;
         case Constants.IDIV: case Constants.IREM:
-            out.print("\tif ("+s(depth)+" == 0) { "+s(0)+" = (int32_t)&aeExc;");
+            out.print("\tif (unlikely("+s(depth)+" == 0)) { "+s(0)+" = (int32_t)&aeExc;");
             dumpThrow(out, method, code, pos);
             out.print(" }"+
                       " "+s(depth-1)+" = (int64_t)"+s(depth-1)+" "+getArithOp(i)+" (int64_t)"+s(depth)+";");
@@ -1125,7 +1140,7 @@ public class ClassInfo {
         case Constants.LDIV: case Constants.LREM:
             out.println("\t{ int64_t a = ((int64_t)"+s(depth-2)+" << 32) | (uint32_t)"+s(depth-3)+";"+
                         " int64_t b = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";");
-            out.print("\tif (b == 0) { "+s(0)+" = (int32_t)&aeExc;");
+            out.print("\tif (unlikely(b == 0)) { "+s(0)+" = (int32_t)&aeExc;");
             dumpThrow(out, method, code, pos);
             out.print(" }"+
                       " a "+getArithOp(i)+"= b;"+
@@ -1245,13 +1260,13 @@ public class ClassInfo {
         case Constants.AALOAD: case Constants.IALOAD: case Constants.FALOAD:
         case Constants.CALOAD: case Constants.SALOAD: case Constants.BALOAD:
             dumpNPE(out, method, code, pos, depth-1);
-            dumpABE(out, method, code, pos, depth-1, depth);
+            dumpABE(out, method, code, pos, depth-1, depth, getArrayType(i));
             out.print("\t"+s(depth-1)+" = jvm_arrload("+getArrayType(i)+", "+s(depth-1)+", "+s(depth)+");");
             break;
 
         case Constants.LALOAD: case Constants.DALOAD:
             dumpNPE(out, method, code, pos, depth-1);
-            dumpABE(out, method, code, pos, depth-1, depth);
+            dumpABE(out, method, code, pos, depth-1, depth, getArrayType(i));
             out.print("\t{ int64_t a = jvm_arrload2("+getArrayType(i)+", "+s(depth-1)+", "+s(depth)+");"+
                       " "+s(depth-1)+" = (int32_t)a;"+
                       " "+s(depth)+" = (int32_t)(a >> 32); }");
@@ -1260,13 +1275,13 @@ public class ClassInfo {
         case Constants.AASTORE: case Constants.IASTORE: case Constants.FASTORE:
         case Constants.CASTORE: case Constants.SASTORE: case Constants.BASTORE:
             dumpNPE(out, method, code, pos, depth-2);
-            dumpABE(out, method, code, pos, depth-2, depth-1);
+            dumpABE(out, method, code, pos, depth-2, depth-1, getArrayType(i));
             out.print("\tjvm_arrstore("+getArrayType(i)+", "+s(depth-2)+", "+s(depth-1)+", "+s(depth)+");");
             break;
 
         case Constants.LASTORE: case Constants.DASTORE:
             dumpNPE(out, method, code, pos, depth-3);
-            dumpABE(out, method, code, pos, depth-3, depth-2);
+            dumpABE(out, method, code, pos, depth-3, depth-2, getArrayType(i));
             out.print("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
                       " jvm_arrstore2("+getArrayType(i)+", "+s(depth-3)+", "+s(depth-2)+", a); }");
             break;
@@ -1490,9 +1505,9 @@ public class ClassInfo {
             return;
         }
         if (gs.getFieldType(constPool).getSize() == 1) {
-            out.print("\t"+s(depth+1)+" = "+ci.getCName()+"._S_"+getCFieldName(fieldName)+";");
+            out.print("\t"+s(depth+1)+" = "+ci.getCName()+"_"+getCFieldName(fieldName)+";");
         } else {
-            out.print("\t{ int64_t a = "+ci.getCName()+"._S_"+getCFieldName(fieldName)+";"+
+            out.print("\t{ int64_t a = "+ci.getCName()+"_"+getCFieldName(fieldName)+";"+
                       " "+s(depth+1)+" = (int32_t)a;"+
                       " "+s(depth+2)+" = (int32_t)(a >> 32); }");
         }
@@ -1508,10 +1523,10 @@ public class ClassInfo {
             return;
         }
         if (ps.getFieldType(constPool).getSize() == 1) {
-            out.print("\t"+ci.getCName()+"._S_"+getCFieldName(fieldName)+" = "+s(depth)+";");
+            out.print("\t"+ci.getCName()+"_"+getCFieldName(fieldName)+" = "+s(depth)+";");
         } else {
             out.print("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
-                      " "+ci.getCName()+"._S_"+getCFieldName(fieldName)+" = a; }");
+                      " "+ci.getCName()+"_"+getCFieldName(fieldName)+" = a; }");
         }
     }
 
@@ -1539,12 +1554,12 @@ public class ClassInfo {
             dumpNotFound(out, "Class", className);
             return;
         }
-        out.print("\tif ("+s(depth)+" != 0 &&");
+        out.print("\tif (unlikely("+s(depth)+" != 0 &&");
         if (ci.clazz.isInterface()) {
             int ifaceIdx = interfaceList.indexOf(ci);
             out.print(" ((("+objci.getCObjTypeName()+"*)"+s(depth)+")->type->itab["+(ifaceIdx / 32)+"] & "+(1 << (ifaceIdx % 32))+"UL) == 0)");
         } else {
-            out.print(" !jvm_instanceof((("+objci.getCObjTypeName()+"*)"+s(depth)+")->type, ("+objci.getCClassTypeName()+"*)&"+ci.getCName()+"))");
+            out.print(" !jvm_instanceof((("+objci.getCObjTypeName()+"*)"+s(depth)+")->type, ("+objci.getCClassTypeName()+"*)&"+ci.getCName()+")))");
         }
         out.print(" { "+s(0)+" = (int32_t)&ccExc;");
         dumpThrow(out, method, code, pos);
@@ -1568,7 +1583,7 @@ public class ClassInfo {
             return;
         }
         out.println("\t"+dstVal+" = (int32_t)jvm_alloc(&"+ci.getCName()+", sizeof("+ci.getCObjTypeName()+"), &exc);");
-        out.print("\tif (exc != 0) { "+s(0)+" = exc; exc = 0;");
+        out.print("\tif (unlikely(exc != 0)) { "+s(0)+" = exc; exc = 0;");
         dumpThrow(out, method, code, pos);
         out.print(" }");
     }
@@ -1590,7 +1605,7 @@ public class ClassInfo {
         String objType = ci.getCObjTypeName();
 
         out.println("\t"+dstVal+" = (int32_t)jvm_alloc(&"+ci.getCName()+", sizeof("+objType+")+"+sizeVal+"*"+size+", &exc);");
-        out.print("\tif (exc != 0) { "+s(0)+" = exc; exc = 0;");
+        out.print("\tif (unlikely(exc != 0)) { "+s(0)+" = exc; exc = 0;");
         dumpThrow(out, method, code, pos);
         out.println(" }");
         out.print("\tjvm_setarrlength("+objType+", "+dstVal+", "+sizeVal+");");
@@ -1665,20 +1680,20 @@ public class ClassInfo {
         }
         
         out.println();
-        out.print("\tif (exc != 0) { "+s(0)+" = exc; exc = 0;");
+        out.print("\tif (unlikely(exc != 0)) { "+s(0)+" = exc; exc = 0;");
         dumpThrow(out, method, code, pos);
         out.print(" }");
     }
 
     public void dumpNPE(PrintWriter out, Method method, Code code, int pos, int depth) {
-        out.print("\tif ("+s(depth)+" == 0) { "+s(0)+" = (int32_t)&npExc;");
+        out.print("\tif (unlikely("+s(depth)+" == 0)) { "+s(0)+" = (int32_t)&npExc;");
         dumpThrow(out, method, code, pos);
         out.println(" }");
     }
 
-    public void dumpABE(PrintWriter out, Method method, Code code, int pos, int depth, int idxdepth) {
-        out.print("\tif ("+s(idxdepth)+" < 0 ||"+
-                  " "+s(idxdepth)+" >= jvm_arrlength(_int___obj_t, "+s(depth)+"))"+
+    public void dumpABE(PrintWriter out, Method method, Code code, int pos, int depth, int idxdepth, String type) {
+        out.print("\tif (unlikely("+s(idxdepth)+" < 0 ||"+
+                  " "+s(idxdepth)+" >= jvm_arrlength("+type+", "+s(depth)+")))"+
                   " { "+s(0)+" = (int32_t)&abExc;");
         dumpThrow(out, method, code, pos);
         out.println(" }");

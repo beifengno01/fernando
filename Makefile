@@ -23,6 +23,8 @@ APPEXENAME=${APP}
 
 APPCSRC=$(shell find ${APPOUTPATH}/classes -name "*.c")
 
+#CC=clang
+#CFLAGS=-m32 -O3 -std=c99 -pedantic -Wall -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function -flto
 CC=gcc
 CFLAGS=-m32 -O3 -std=c99 -pedantic -Wall -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function -Wno-unused-but-set-variable -flto -fwhole-program
 
