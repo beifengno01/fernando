@@ -37,6 +37,8 @@
 #include <pthread.h>
 #include "jvm.h"
 
+#define DEFAULT_HEAP_SIZE (1024*1024)
+
 pthread_mutex_t globalLock = PTHREAD_MUTEX_INITIALIZER;
 
 int32_t *allocPtr;
@@ -51,8 +53,22 @@ _java_lang_OutOfMemoryError_obj_t omErr = { &_java_lang_OutOfMemoryError, 0, };
 _java_lang_VirtualMachineError_obj_t vmErr = { &_java_lang_VirtualMachineError, 0, };
 
 void jvm_clinit(int32_t *exc) {
-  const int heapSize = 256*1024;
+
+  long int heapSize = DEFAULT_HEAP_SIZE;
+  char *envHeapSize = getenv("FERNANDO_HEAP_SIZE");
+  if (envHeapSize) {
+    char *endPtr;
+    long int size = strtol(envHeapSize, &endPtr, 0);
+    if (*envHeapSize != '\0' && *endPtr == '\0') {
+      heapSize = size;
+    }
+  }
+
   allocPtr = malloc(heapSize);
+  if (!allocPtr) {
+    *exc = (int32_t)&omErr;
+    return;
+  }
   allocEnd = allocPtr+(heapSize >> 2);
   setlocale(LC_ALL, "");
 }
