@@ -91,6 +91,34 @@ void jvm_init(int32_t *retexc) {
   if (exc != 0) { *retexc = exc; return; }
 }
 
+int32_t jvm_args(int argc, char **argv, int32_t *exc) {
+  // create String array to hold arguments
+  int32_t args = (int32_t)jvm_alloc(&_java_lang_String__, sizeof(_java_lang_String___obj_t)+(argc-1)*4, exc);
+  jvm_setarrlength(_java_lang_String___obj_t, args, argc-1);
+
+  int i;
+  for (i = 1; i < argc; i++) {
+    // convert argument to character array
+    int32_t len = strlen(argv[i]);
+    uint16_t buf [len];
+    int32_t bytes = jvm_encode(argv[i], len, buf, len*sizeof(buf[0]));
+    // store converted characters in Java array
+    int32_t arr = (int32_t)jvm_alloc(&_char__, sizeof(_char___obj_t)+bytes, exc);
+    int32_t arrlen = bytes/sizeof(buf[0]);
+    jvm_setarrlength(_char___obj_t, arr, arrlen);
+    for (int k = 0; k < arrlen; k++) {
+      jvm_arrstore(_char___obj_t, arr, k, buf[k]);
+    }
+    // create String from character array
+    int32_t arg = (int32_t)jvm_alloc(&_java_lang_String, sizeof(_java_lang_String_obj_t), exc);
+    _java_lang_String__init___C_V(arg, arr, exc);
+    // store argument in array of arguments
+    jvm_arrstore(_java_lang_String___obj_t, args, i-1, arg);
+  }
+
+  return args;
+}
+
 static int init_lock(_java_lang_Object_obj_t *obj) {
   int retval = 0;
   if (obj->lock == NULL) {
@@ -180,19 +208,21 @@ int32_t jvm_instanceof(const _java_lang_Object_class_t *ref,
   return jvm_instanceof(ref->super, type);
 }
 
-int32_t jvm_decode(uint16_t *inbuf, int32_t inbytes, char *outbuf, int32_t outbytes) {
-#ifdef __patmos__ /* no implementation of iconv on Patmos */
-  int32_t i;
-  for (i = 0; i < inbytes/sizeof(inbuf[0]); i++) {
-    if (inbuf[i] < 0x7f) {
-      outbuf[i] = inbuf[i];
-    } else {
-      outbuf[i] = '?';
-    }
+int32_t jvm_encode(char *inbuf, int32_t inbytes, uint16_t *outbuf, int32_t outbytes) {
+  iconv_t conv = iconv_open("UTF-16LE//TRANSLIT", "//");
+  int32_t maxbytes = outbytes;
+  int32_t len = iconv(conv, &inbuf, (size_t *)&inbytes,
+                      (char **)&outbuf, (size_t *)&outbytes);
+  iconv_close(conv);
+  if (len < 0) {
+    return len;
+  } else {
+    return maxbytes-outbytes;
   }
-  return inbytes/sizeof(inbuf[0]);
-#else
-  iconv_t conv = iconv_open("//TRANSLIT", "UTF-16//");
+}
+
+int32_t jvm_decode(uint16_t *inbuf, int32_t inbytes, char *outbuf, int32_t outbytes) {
+  iconv_t conv = iconv_open("//TRANSLIT", "UTF-16LE//");
   int32_t maxbytes = outbytes;
   int32_t len = iconv(conv, (char **)&inbuf, (size_t *)&inbytes,
                       &outbuf, (size_t *)&outbytes);
@@ -202,7 +232,6 @@ int32_t jvm_decode(uint16_t *inbuf, int32_t inbytes, char *outbuf, int32_t outby
   } else {
     return maxbytes-outbytes;
   }
-#endif
 }
 
 void jvm_catch(int32_t exc) {
@@ -228,6 +257,10 @@ void jvm_catch(int32_t exc) {
 }
 
 int32_t *jvm_alloc(void *type, int32_t size, int32_t *exc) {
+  if (size < 0) {
+    *exc = (int32_t)&omErr;
+    return allocPtr;
+  }
 
   pthread_mutex_lock(&globalLock);
   int32_t *ptr = allocPtr;

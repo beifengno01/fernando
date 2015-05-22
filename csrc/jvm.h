@@ -53,7 +53,9 @@ extern _java_lang_String_obj_t stringPool[];
 
 void jvm_clinit(int32_t *exc);
 void jvm_init(int32_t *exc);
+int32_t jvm_args(int argc, char **argv, int32_t *exc);
 
+int32_t jvm_encode(char *inbuf, int32_t inbytes, uint16_t *outbuf, int32_t outbytes);
 int32_t jvm_decode(uint16_t *inbuf, int32_t inbytes, char *outbuf, int32_t outbytes);
 void jvm_catch(int32_t exc);
 
