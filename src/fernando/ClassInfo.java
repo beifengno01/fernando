@@ -116,6 +116,7 @@ public class ClassInfo {
         hull.add("[J");
         hull.add("[F");
         hull.add("[D");
+        hull.add("[Ljava.lang.String;");
         hull.add("java.lang.Class");
         hull.add("java.lang.Thread");
         hull.add("java.lang.NullPointerException");
@@ -1123,10 +1124,17 @@ public class ClassInfo {
             break;
 
         case Constants.F2I:
-            out.print("\t{ float *a = (float *)&"+s(depth)+"; "+s(depth)+" = *a; }");
+            out.print("\t{ float *a = (float *)&"+s(depth)+";"+
+                      " if (*a != *a) { "+s(depth)+" = 0; }"+
+                      " else if (*a >= (int32_t)0x7fffffff) { "+s(depth)+" = 0x7fffffff; }"+
+                      " else if (*a <= (int32_t)0x80000000) { "+s(depth)+" = 0x80000000; }"+
+                      " else { "+s(depth)+" = *a; } }");
             break;
         case Constants.F2L:
             out.print("\t{ float *a = (float *)&"+s(depth)+"; int64_t b = *a;"+
+                      " if (*a != *a) { b = 0; }"+
+                      " else if (*a >= (int64_t)0x7fffffffffffffffLL) { b = 0x7fffffffffffffffLL; }"+
+                      " else if (*a <= (int64_t)0x8000000000000000LL) { b = 0x8000000000000000LL; }"+
                       " "+s(depth)+" = (int32_t)b;"+
                       " "+s(depth+1)+" = (int32_t)(b >> 32); }");
             break;
@@ -1139,11 +1147,19 @@ public class ClassInfo {
 
         case Constants.D2I:
             out.print("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
-                      " double *b = (double *)&a; "+s(depth-1)+" = *b; }");
+                      " double *b = (double *)&a;"+
+                      " if (*b != *b) { "+s(depth-1)+" = 0; }"+
+                      " else if (*b >= (int32_t)0x7fffffff) { "+s(depth-1)+" = 0x7fffffff; }"+
+                      " else if (*b <= (int32_t)0x80000000) { "+s(depth-1)+" = 0x80000000; }"+
+                      " else { "+s(depth-1)+" = *b; } }");
             break;
         case Constants.D2L:
             out.print("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
-                      " double *b = (double *)&a; a = *b;"+
+                      " double *b = (double *)&a;"+
+                      " if (*b != *b) { a = 0; }"+
+                      " else if (*b >= (int64_t)0x7fffffffffffffffLL) { a = 0x7fffffffffffffffLL; }"+
+                      " else if (*b <= (int64_t)0x8000000000000000LL) { a = 0x8000000000000000LL; }"+
+                      " else { a = *b; }"+
                       " "+s(depth-1)+" = (int32_t)a;"+
                       " "+s(depth)+" = (int32_t)(a >> 32); }");
             break;
@@ -1210,13 +1226,13 @@ public class ClassInfo {
             break;
         case Constants.FCMPL:
             out.print("\t{ float *a = (float *)&"+s(depth-1)+"; float *b = (float *)&"+s(depth)+";"+
-                      " "+s(depth-1)+" = *a > *b ? 1 : (*a == *b ? 0 : -1);"+
-                      " if (*a != *a || *b != *b) "+s(depth-1)+" = -1; }");
+                      " if (*a != *a || *b != *b) { "+s(depth-1)+" = -1; }"+
+                      " else { "+s(depth-1)+" = *a > *b ? 1 : (*a == *b ? 0 : -1); } }");
             break;
         case Constants.FCMPG:
             out.print("\t{ float *a = (float *)&"+s(depth-1)+"; float *b = (float *)&"+s(depth)+";"+
-                      " "+s(depth-1)+" = *a > *b ? 1 : (*a == *b ? 0 : -1);"+
-                      " if (*a != *a || *b != *b) "+s(depth-1)+" = 1; }");
+                      " if (*a != *a || *b != *b) { "+s(depth-1)+" = 1; }"+
+                      " else { "+s(depth-1)+" = *a > *b ? 1 : (*a == *b ? 0 : -1); } }");
             break;
 
         case Constants.DADD: case Constants.DSUB:
@@ -1246,15 +1262,15 @@ public class ClassInfo {
             out.print("\t{ int64_t a = ((int64_t)"+s(depth-2)+" << 32) | (uint32_t)"+s(depth-3)+";"+
                       " int64_t b = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
                       " double *c = (double *)&a; double *d = (double *)&b;"+
-                      " "+s(depth-3)+" = *c > *d ? 1 : (*c == *d ? 0 : -1);"+
-                      " if (*c != *c || *d != *d) "+s(depth-3)+" = -1; }");
+                      " if (*c != *c || *d != *d) { "+s(depth-3)+" = -1; }"+
+                      " else { "+s(depth-3)+" = *c > *d ? 1 : (*c == *d ? 0 : -1); } }");
             break;
         case Constants.DCMPG:
             out.print("\t{ int64_t a = ((int64_t)"+s(depth-2)+" << 32) | (uint32_t)"+s(depth-3)+";"+
                       " int64_t b = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
                       " double *c = (double *)&a; double *d = (double *)&b;"+
-                      " "+s(depth-3)+" = *c > *d ? 1 : (*c == *d ? 0 : -1);"+
-                      " if (*c != *c || *d != *d) "+s(depth-3)+" = 1; }");
+                      " if (*c != *c || *d != *d) { "+s(depth-3)+" = 1; }"+
+                      " else { "+s(depth-3)+" = *c > *d ? 1 : (*c == *d ? 0 : -1); } }");
             break;
 
         case Constants.GETFIELD: {
@@ -1784,7 +1800,7 @@ public class ClassInfo {
     public void dumpSyncEnter(PrintWriter out, Method method, Code code, int pos) {
         if (method.isSynchronized()) {
             if (method.isStatic()) {
-                out.println("\t"+s(0)+" = "+getCName()+";");
+                out.println("\t"+s(0)+" = (int32_t)&"+getCName()+";");
             } else {
                 out.println("\t"+s(0)+" = "+v(0)+";");
             }
@@ -1794,7 +1810,7 @@ public class ClassInfo {
     public void dumpSyncReturn(PrintWriter out, Method method, Code code, int pos) {
         if (method.isSynchronized()) {            
             if (method.isStatic()) {
-                out.println("\t"+s(0)+" = "+getCName()+";");
+                out.println("\t"+s(0)+" = (int32_t)&"+getCName()+";");
             } else {
                 out.println("\t"+s(0)+" = "+v(0)+";");
             }
@@ -1865,7 +1881,10 @@ public class ClassInfo {
         out.println("\tjvm_init(&exc);");
         out.println("\tif (exc != 0) { jvm_catch(exc); }");
 
-        out.println("\t"+entry.getCName()+"_main__Ljava_lang_String__V(0, &exc);");
+        out.println("\tint32_t args = jvm_args(argc, argv, &exc);");
+        out.println("\tif (exc != 0) { jvm_catch(exc); }");
+
+        out.println("\t"+entry.getCName()+"_main__Ljava_lang_String__V(args, &exc);");
 
         out.println("\tif (exc != 0) { jvm_catch(exc); }");
         out.println("\tpthread_exit(NULL);");
