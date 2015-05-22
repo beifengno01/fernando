@@ -32,11 +32,12 @@
 
 package java.lang;
 
-public class ClassCastException extends RuntimeException {
-    public ClassCastException() {
-        super();
-    }
-    public ClassCastException(String message) {
-        super(message);
+public abstract class Enum<E extends Enum<E>> {
+    private String name;
+    private int ordinal;
+
+    protected Enum(String name, int ordinal) {
+        this.name = name;
+        this.ordinal = ordinal;
     }
 }

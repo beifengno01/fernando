@@ -37,13 +37,24 @@ public class Thread implements Runnable {
     private int _pthread;
 
     private Runnable target;
-
-    public Thread(Runnable target) {
-        this.target = target;
-    }
+    private String name;
 
     public Thread() {
-        this(null);
+        this(null, null);
+    }
+    public Thread(String name) {
+        this(null, name);
+    }
+    public Thread(Runnable target) {
+        this(target, null);
+    }
+    public Thread(Runnable target, String name) {
+        this.target = target;
+        this.name = name;
+    }
+
+    public String getName() {
+        return name;
     }
 
     public void run() {

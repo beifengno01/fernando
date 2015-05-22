@@ -44,4 +44,8 @@ public class System {
     public static InputStream in = new NativeInputStream();
 
     public static native long currentTimeMillis();
+
+    public static native void exit(int status);
+
+    public static void gc() { /* ignore */ }
 }

@@ -33,6 +33,55 @@
 package java.lang;
 
 public class Integer {
+    private int value;
+    
+    public Integer(int value) {
+        this.value = value;
+    }
+
+    public static int parseInt(String s) throws NumberFormatException {
+        int sign = 1;
+        int val = 0;
+        int i = 0;
+        if (s.charAt(i) == '+') {
+            i++;
+        } else if (s.charAt(i) == '-') {
+            i++;
+            sign = -1;
+        }
+        for ( ; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= '0' && c <= '9') {
+                val = val * 10 + (c-'0');
+            } else {
+                throw new NumberFormatException();
+            }
+        }
+        return sign*val;
+    }
+
+    public static String toString(int i) {
+        if (i == 0) {
+            return "0";
+        }
+        char buf [] = new char[11];
+        int pos = 0;
+        if (i < 0) {
+            buf[pos++] = '-';
+        } else {
+            i = -i;
+        }
+        boolean cont = false;
+        for (int k = 1000000000; k > 0; k /= 10) {
+            int m = -((i/k)%10);
+            if (m != 0 || cont) {
+                buf[pos++] = (char)('0'+m);
+                cont = true;
+            }
+        }
+        return new String(buf, 0, pos);
+    }
+
     public static String toHexString(int i) {
         if (i == 0) {
             return "0";

@@ -30,13 +30,19 @@
    policies, either expressed or implied, of the copyright holder.
 */
 
-package java.lang;
+package java.io;
 
-public class ClassCastException extends RuntimeException {
-    public ClassCastException() {
+public class IOException extends Exception {
+    public IOException() {
         super();
     }
-    public ClassCastException(String message) {
+    public IOException(String message) {
         super(message);
+    }
+    public IOException(Throwable cause) {
+        super(cause);
+    }
+    public IOException(String message, Throwable cause) {
+        super(message, cause);
     }
 }

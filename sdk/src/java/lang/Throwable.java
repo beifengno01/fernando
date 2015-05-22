@@ -32,5 +32,50 @@
 
 package java.lang;
 
+import java.io.PrintStream;
+
 public class Throwable {
+    private String message;
+    private Throwable cause;
+
+    public Throwable() {
+        this(null, null);
+    }
+    public Throwable(String message) {
+        this(message, null);
+    }
+    public Throwable(Throwable cause) {
+        this((cause==null ? null : cause.toString()), cause);
+    }
+    public Throwable(String message, Throwable cause) {
+        this.message = message;
+        this.cause = cause;
+    }
+
+    public String getMessage() {
+        return message;
+    }
+
+    public Throwable getCause() {
+        return cause;
+    }
+
+    public String toString() {
+        if (message != null) {
+            return getClass().getName()+": "+message;
+        } else {
+            return getClass().getName();
+        }
+    }
+
+    public void printStackTrace() {
+        printStackTrace(System.err);
+    }
+    public void printStackTrace(PrintStream s) {
+        s.println(toString());
+        s.println("\t(stack trace unsupported)");
+        if (cause != null) {
+            cause.printStackTrace(s);
+        }
+    }
 }

@@ -32,11 +32,11 @@
 
 package java.lang;
 
-public class ClassCastException extends RuntimeException {
-    public ClassCastException() {
+public class IndexOutOfBoundsException extends RuntimeException {
+    public IndexOutOfBoundsException() {
         super();
     }
-    public ClassCastException(String message) {
+    public IndexOutOfBoundsException(String message) {
         super(message);
     }
 }

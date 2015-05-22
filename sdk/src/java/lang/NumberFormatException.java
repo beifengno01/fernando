@@ -32,11 +32,11 @@
 
 package java.lang;
 
-public class ClassCastException extends RuntimeException {
-    public ClassCastException() {
+public class NumberFormatException extends IllegalArgumentException {
+    public NumberFormatException() {
         super();
     }
-    public ClassCastException(String message) {
+    public NumberFormatException(String message) {
         super(message);
     }
 }

@@ -33,6 +33,55 @@
 package java.lang;
 
 public class Long {
+    private long value;
+
+    public Long(long value) {
+        this.value = value;
+    }
+
+    public static long parseLong(String s) throws NumberFormatException {
+        int sign = 1;
+        long val = 0;
+        int i = 0;
+        if (s.charAt(i) == '+') {
+            i++;
+        } else if (s.charAt(i) == '-') {
+            i++;
+            sign = -1;
+        }
+        for ( ; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= '0' && c <= '9') {
+                val = val * 10 + (c-'0');
+            } else {
+                throw new NumberFormatException();
+            }
+        }
+        return sign*val;
+    }
+
+    public static String toString(long l) {
+        if (l == 0) {
+            return "0";
+        }
+        char buf [] = new char[20];
+        int pos = 0;
+        if (l < 0) {
+            buf[pos++] = '-';
+        } else {
+            l = -l;
+        }
+        boolean cont = false;
+        for (long k = 1000000000000000000L; k > 0; k /= 10) {
+            int m = -(int)((l/k)%10);
+            if (m != 0 || cont) {
+                buf[pos++] = (char)('0'+m);
+                cont = true;
+            }
+        }
+        return new String(buf, 0, pos);
+    }
+
     public static String toHexString(long l) {
         if (l == 0) {
             return "0";

@@ -77,6 +77,10 @@ int64_t _java_lang_System_currentTimeMillis__J(int32_t *exc) {
   return time.tv_sec*1000 + time.tv_usec/1000;
 }
 
+void _java_lang_System_exit_I_V(int32_t status, int32_t *exc) {
+  exit(status);
+}
+
 struct thread_args_t {
   int32_t ref;
   int32_t *exc;
@@ -151,46 +155,101 @@ int32_t _ferdl_io_NativeInputStream_read__I(int32_t ref, int32_t *exc) {
   return getchar();
 }
 
-int32_t _java_lang_String_fillDoubleValue__BD_I(int32_t buf, int32_t lo, int32_t hi, int32_t *exc) {
-  int64_t v = ((int64_t)hi << 32) | (uint32_t)lo;
-  double *d = (double *)&v;
-  char *b = (char *)&((_byte___obj_t *)buf)->_1_data;
-  return sprintf(b, "%g", *d);
+int32_t _java_lang_Float_floatToIntBits_F_I(int32_t val, int32_t *exc) {
+  return val;
+}
+int32_t _java_lang_Float_intBitsToFloat_I_F(int32_t val, int32_t *exc) {
+  return val;
 }
 
-#define MATHFUN1(FUN)                                                    \
-  int64_t _java_lang_Math_##FUN##_D_D(int32_t lo, int32_t hi, int32_t *exc) { \
+int64_t _java_lang_Double_doubleToLongBits_D_J(int32_t lo, int32_t hi, int32_t *exc) {
+  return ((int64_t) hi << 32) | (uint32_t)lo;
+}
+int64_t _java_lang_Double_longBitsToDouble_J_D(int32_t lo, int32_t hi, int32_t *exc) {
+  return ((int64_t) hi << 32) | (uint32_t)lo;
+}
+
+#define _DMATHFUN1(JFUN, CFUN, ARGTY, RETTY)                             \
+  int64_t _java_lang_Math_##JFUN##_##ARGTY##_##RETTY(int32_t lo, int32_t hi, int32_t *exc) { \
     int64_t v = ((int64_t) hi << 32) | (uint32_t)lo;                    \
     double *d = (double *)&v;                                           \
-    *d = FUN(*d);                                                       \
+    *d = CFUN(*d);                                                      \
     return v;                                                           \
   }
-MATHFUN1(asin)
-MATHFUN1(acos)
-MATHFUN1(atan)
-MATHFUN1(sin)
-MATHFUN1(cos)
-MATHFUN1(tan)
-MATHFUN1(sinh)
-MATHFUN1(cosh)
-MATHFUN1(tanh)
-MATHFUN1(sqrt)
-MATHFUN1(cbrt)
-MATHFUN1(exp)
-MATHFUN1(expm1)
-MATHFUN1(log)
-MATHFUN1(log10)
-MATHFUN1(log1p)
 
-#define MATHFUN2(FUN)                                                   \
+#define DMATHFUN1(FUN) _DMATHFUN1(FUN,FUN,D,D)
+DMATHFUN1(asin)
+DMATHFUN1(acos)
+DMATHFUN1(atan)
+DMATHFUN1(sin)
+DMATHFUN1(cos)
+DMATHFUN1(tan)
+DMATHFUN1(sinh)
+DMATHFUN1(cosh)
+DMATHFUN1(tanh)
+DMATHFUN1(sqrt)
+DMATHFUN1(cbrt)
+DMATHFUN1(exp)
+DMATHFUN1(expm1)
+DMATHFUN1(log)
+DMATHFUN1(log10)
+DMATHFUN1(log1p)
+DMATHFUN1(ceil)
+DMATHFUN1(floor)
+
+_DMATHFUN1(round, llround, D, J)
+
+#define DMATHFUN2(FUN)                                                   \
   int64_t _java_lang_Math_##FUN##_DD_D(int32_t lo1, int32_t hi1, int32_t lo2, int32_t hi2, int32_t *exc) { \
     int64_t v1 = ((int64_t) hi1 << 32) | (uint32_t)lo1;                 \
     double *d1 = (double *)&v1;                                         \
     int64_t v2 = ((int64_t) hi2 << 32) | (uint32_t)lo2;                 \
     double *d2 = (double *)&v2;                                         \
-    *d1 = FUN(*d1, *d2);                                                \
+    *d1 = FUN(*d1, *d2);                                               \
     return v1;                                                          \
   }
-MATHFUN2(atan2)
-MATHFUN2(pow)
-MATHFUN2(hypot)
+
+DMATHFUN2(atan2)
+DMATHFUN2(pow)
+DMATHFUN2(hypot)
+
+#define _FMATHFUN1(JFUN, CFUN, ARGTY, RETTY)                            \
+  int32_t _java_lang_Math_##JFUN##_##ARGTY##_##RETTY(int32_t v, int32_t *exc) { \
+    float *f = (float *)&v;                                             \
+    *f = CFUN(*f);                                                      \
+    return v;                                                           \
+  }
+
+#define FMATHFUN1(FUN) _FMATHFUN1(FUN,FUN##f,F,F)
+FMATHFUN1(asin)
+FMATHFUN1(acos)
+FMATHFUN1(atan)
+FMATHFUN1(sin)
+FMATHFUN1(cos)
+FMATHFUN1(tan)
+FMATHFUN1(sinh)
+FMATHFUN1(cosh)
+FMATHFUN1(tanh)
+FMATHFUN1(sqrt)
+FMATHFUN1(cbrt)
+FMATHFUN1(exp)
+FMATHFUN1(expm1)
+FMATHFUN1(log)
+FMATHFUN1(log10)
+FMATHFUN1(log1p)
+FMATHFUN1(ceil)
+FMATHFUN1(floor)
+
+_FMATHFUN1(round, lroundf, F, I)
+
+#define FMATHFUN2(FUN)                                                  \
+  int32_t _java_lang_Math_##FUN##_FF_F(int32_t v1, int32_t v2, int32_t *exc) { \
+    float *d1 = (float *)&v1;                                           \
+    float *d2 = (float *)&v2;                                           \
+    *d1 = FUN##f(*d1, *d2);                                             \
+    return v1;                                                          \
+  }
+
+FMATHFUN2(atan2)
+FMATHFUN2(pow)
+FMATHFUN2(hypot)

@@ -56,7 +56,9 @@ public class String {
             value[i] = data[offset+i];
         }
     }
-
+    public String(String original) {
+        this(original.value);
+    }
 
     public char charAt(int index) {
         return value[index];
@@ -70,6 +72,61 @@ public class String {
         return this;
     }
 
+    public String substring(int beginIndex) {
+        return substring(beginIndex, length());
+    }
+
+    public String substring(int beginIndex, int endIndex) {
+        return new String(value, beginIndex, endIndex-beginIndex);
+    }
+
+    public boolean startsWith(String prefix) {
+        return startsWith(prefix, 0);
+    }
+    public boolean startsWith(String prefix, int toffset) {
+        return regionMatches(toffset, prefix, 0, prefix.length());
+    }
+
+    public boolean endsWith(String suffix) {
+        return regionMatches(length()-suffix.length(), suffix, 0, suffix.length());
+    }
+
+    public int indexOf(int ch) {
+        return indexOf(ch, 0);
+    }
+    public int indexOf(int ch, int fromIndex) {
+        for (int i = fromIndex; i < length(); i++) {
+            if (ch == charAt(i)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public int indexOf(String str) {
+        return indexOf(str, 0);
+    }
+    public int indexOf(String str, int fromIndex) {
+        for (int i = fromIndex; i <= length()-str.length(); i++) {
+            if (this.startsWith(str, i)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public boolean contains(String str) {
+        return indexOf(str) >= 0;
+    }
+
+    public boolean regionMatches(int toffset, String other, int ooffset, int len) {
+        for (int i = 0; i < len; i++) {
+            if (charAt(toffset+i) != other.charAt(ooffset+1)) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     public static String valueOf(boolean b) {
         return b ? "true" : "false";
@@ -90,56 +147,19 @@ public class String {
     }
 
     public static String valueOf(int i) {
-        if (i == 0) {
-            return "0";
-        }
-        char buf [] = new char[11];
-        int pos = 0;
-        if (i < 0) {
-            buf[pos++] = '-';
-            i = -i;
-        } 
-        boolean cont = false;
-        for (int k = 1000000000; k > 0; k /= 10) {
-            int m = (i/k)%10;
-            if (m != 0 || cont) {
-                buf[pos++] = (char)('0'+m);
-                cont = true;
-            }
-        }
-        return new String(buf, 0, pos);
+        return Integer.toString(i);
     }
 
     public static String valueOf(long l) {
-        if (l == 0) {
-            return "0";
-        }
-        char buf [] = new char[20];
-        int pos = 0;
-        if (l < 0) {
-            buf[pos++] = '-';
-            l = -l;
-        } 
-        boolean cont = false;
-        for (long k = 1000000000000000000L; k > 0; k /= 10) {
-            int m = (int)((l/k)%10);
-            if (m != 0 || cont) {
-                buf[pos++] = (char)('0'+m);
-                cont = true;
-            }
-        }
-        return new String(buf, 0, pos);
+        return Long.toString(l);
     }
 
     public static String valueOf(float f) {
-        return valueOf((double)f);
+        return Float.toString(f);
     }
 
-    private static native int fillDoubleValue(byte [] buf, double d);
     public static String valueOf(double d) {
-        byte [] buf = new byte[32];
-        int len = fillDoubleValue(buf, d);
-        return new String(buf, 0, len);
+        return Double.toString(d);
     }
 
     public static String valueOf(Object obj) {
