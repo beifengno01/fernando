@@ -37,6 +37,8 @@
 #include <pthread.h>
 #include "defs.h"
 
+extern pthread_key_t currentThread;
+
 extern pthread_mutex_t globalLock;
 
 extern int32_t *allocPtr;

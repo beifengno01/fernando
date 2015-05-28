@@ -67,4 +67,6 @@ public class Thread implements Runnable {
     public native void join() throws InterruptedException;
     public static native void yield();
     public static native void sleep(long millis) throws InterruptedException;
+
+    public static native Thread currentThread();
 }

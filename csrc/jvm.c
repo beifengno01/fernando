@@ -39,6 +39,8 @@
 
 #define DEFAULT_HEAP_SIZE (1024*1024)
 
+pthread_key_t currentThread;
+
 pthread_mutex_t globalLock = PTHREAD_MUTEX_INITIALIZER;
 
 int32_t *allocPtr;
@@ -51,6 +53,9 @@ _java_lang_ArithmeticException_obj_t aeExc = { &_java_lang_ArithmeticException, 
 _java_lang_InterruptedException_obj_t intrExc = { &_java_lang_InterruptedException, 0, };
 _java_lang_OutOfMemoryError_obj_t omErr = { &_java_lang_OutOfMemoryError, 0, };
 _java_lang_VirtualMachineError_obj_t vmErr = { &_java_lang_VirtualMachineError, 0, };
+
+_java_lang_Thread_obj_t mainThread = { &_java_lang_Thread, 0, };
+pthread_t main_pthread;
 
 void jvm_clinit(int32_t *exc) {
 
@@ -70,6 +75,10 @@ void jvm_clinit(int32_t *exc) {
     return;
   }
   allocEnd = allocPtr+(heapSize >> 2);
+
+  main_pthread = pthread_self();
+  pthread_key_create(&currentThread, NULL);
+
   setlocale(LC_ALL, "");
 }
 
@@ -89,6 +98,11 @@ void jvm_init(int32_t *retexc) {
   if (exc != 0) { *retexc = exc; return; }
   _java_lang_VirtualMachineError__init___V((int32_t)&vmErr, &exc);
   if (exc != 0) { *retexc = exc; return; }
+
+  _java_lang_Thread__init___V((int32_t)&mainThread, &exc);
+  if (exc != 0) { *retexc = exc; return; }
+  jvm_putfield(_java_lang_Thread_obj_t, &mainThread, 0, _pthread, (int32_t)&main_pthread);
+  pthread_setspecific(currentThread, &mainThread);
 }
 
 int32_t jvm_args(int argc, char **argv, int32_t *exc) {

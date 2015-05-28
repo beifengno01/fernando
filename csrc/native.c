@@ -88,6 +88,7 @@ struct thread_args_t {
 static void *thread_wrapper(void *arg_ptr) {
   struct thread_args_t *args = (struct thread_args_t *)arg_ptr;
   _java_lang_Thread_obj_t *thread = (_java_lang_Thread_obj_t *)args->ref;
+  pthread_setspecific(currentThread, thread);
   thread->type->run__V(args->ref, args->exc);
   free(args);
   return NULL;
@@ -123,7 +124,6 @@ void _java_lang_Thread_join__V(int32_t ref, int32_t *exc) {
   if (pthread_join(*thread, NULL)) {
     *exc = (int32_t)&vmErr;
   }
-  free(thread);
 }
 
 void _java_lang_Thread_yield__V(int32_t *exc) {
@@ -138,6 +138,10 @@ void _java_lang_Thread_sleep_J_V(int32_t lo, int32_t hi, int32_t *exc) {
     *exc = (int32_t)&intrExc;
     return;
   }
+}
+
+int32_t _java_lang_Thread_currentThread__Ljava_lang_Thread_(int32_t *exc) {
+  return (int32_t)pthread_getspecific(currentThread);
 }
 
 void _ferdl_io_NativeOutputStream_write_I_V(int32_t ref, int32_t b, int32_t *exc) {
