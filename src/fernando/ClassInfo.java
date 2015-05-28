@@ -89,6 +89,7 @@ import java.io.IOException;
 
 import java.util.AbstractMap;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -921,23 +922,26 @@ public class ClassInfo {
         }
 
         StackDepths depthMap = new StackDepths(il, constPool);
+        StackReferences refMap = new StackReferences(il, constPool);
 
         dumpSyncEnter(out, method, code, 0);
 
         for (InstructionHandle ih : il.getInstructionHandles()) {
             Instruction i = ih.getInstruction();
             int pos = ih.getPosition();
-            int depth = depthMap.get(pos);            
+            int depth = depthMap.get(pos);
+            Deque<Boolean> refs = refMap.get(pos);
 
             if (ih.hasTargeters() || excHandlers.contains(pos)) {
                 out.print("L"+pos+":");
             }
 
-            dumpInstruction(out, stringPool, method, code, pos, i, depth);
+            dumpInstruction(out, stringPool, method, code, pos, i, depth, refs);
         }
     }
 
-    public void dumpInstruction(PrintWriter out, Map<String, Integer> stringPool, Method method, Code code, int pos, Instruction i, int depth) {
+    public void dumpInstruction(PrintWriter out, Map<String, Integer> stringPool, Method method, Code code, int pos, Instruction i, int depth, Deque<Boolean> refs) {
+
         switch (i.getOpcode()) {
         case Constants.ACONST_NULL:
             out.print("\t"+s(depth+1)+" = 0;");                
@@ -1060,6 +1064,11 @@ public class ClassInfo {
             break;
         case Constants.POP2:
             out.print("\t/* pop2 */;");
+            break;
+        case Constants.SWAP:
+            out.print("\t{ int32_t a = "+s(depth)+";"+
+                      " "+s(depth)+" = "+s(depth-1)+";"+
+                      " "+s(depth-1)+" = a; }");
             break;
 
         case Constants.IINC: {
