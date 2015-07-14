@@ -63,6 +63,7 @@ import org.apache.bcel.generic.ReturnInstruction;
 import org.apache.bcel.generic.Select;
 import org.apache.bcel.generic.StoreInstruction;
 import org.apache.bcel.generic.Type;
+import org.apache.bcel.generic.ReferenceType;
 import org.apache.bcel.generic.UnconditionalBranch;
 import org.apache.bcel.generic.ANEWARRAY;
 import org.apache.bcel.generic.ATHROW;
@@ -291,12 +292,20 @@ public class ClassInfo {
 
     public int getFieldIndex(String name) {
         List<Field> fields = getInstanceFields();
-        for (int i = fields.size()-1; i >= 0; i--) {
+        int i;
+        for (i = fields.size()-1; i >= 0; i--) {            
             if (fields.get(i).getName().equals(name)) {
-                return i;
+                break;
             }
         }
-        return -1;
+        if (i < 0) {
+            return -1;
+        }
+        int idx = 0;
+        for (int k = 0; k < i; k++) {
+            idx += fields.get(k).getType().getSize();
+        }
+        return idx;
     }
 
     public List<Method> getMethods() {
@@ -696,7 +705,7 @@ public class ClassInfo {
                 out.print("\t");
             }
             out.println(getCType(f.getType())+" _"+fieldIdx+"_"+getCFieldName(f.getName())+";");
-            fieldIdx++;
+            fieldIdx += f.getType().getSize();
         }
         out.println("} "+getCObjTypeName()+";");
         out.println();
@@ -1310,13 +1319,20 @@ public class ClassInfo {
         case Constants.CALOAD: case Constants.SALOAD: case Constants.BALOAD:
             dumpNPE(out, method, code, pos, depth-1);
             dumpABE(out, method, code, pos, depth-1, depth, getArrayType(i));
-            out.print("\t"+s(depth-1)+" = jvm_arrload("+getArrayType(i)+", "+s(depth-1)+", "+s(depth)+");");
+            
+            out.print("\t"+s(depth-1)+" = ");
+            if (i.getOpcode() == Constants.AALOAD) {
+                out.print("jvm_arrload_ref(");
+            } else {
+                out.print("jvm_arrload(");
+            }
+            out.print(getArrayType(i)+", "+s(depth-1)+", "+s(depth)+");");
             break;
 
         case Constants.LALOAD: case Constants.DALOAD:
             dumpNPE(out, method, code, pos, depth-1);
             dumpABE(out, method, code, pos, depth-1, depth, getArrayType(i));
-            out.print("\t{ int64_t a = jvm_arrload2("+getArrayType(i)+", "+s(depth-1)+", "+s(depth)+");"+
+            out.print("\t{ int64_t a = jvm_arrload_long("+getArrayType(i)+", "+s(depth-1)+", "+s(depth)+");"+
                       " "+s(depth-1)+" = (int32_t)a;"+
                       " "+s(depth)+" = (int32_t)(a >> 32); }");
             break;
@@ -1325,14 +1341,19 @@ public class ClassInfo {
         case Constants.CASTORE: case Constants.SASTORE: case Constants.BASTORE:
             dumpNPE(out, method, code, pos, depth-2);
             dumpABE(out, method, code, pos, depth-2, depth-1, getArrayType(i));
-            out.print("\tjvm_arrstore("+getArrayType(i)+", "+s(depth-2)+", "+s(depth-1)+", "+s(depth)+");");
+            if (i.getOpcode() == Constants.AASTORE) {
+                out.print("\tjvm_arrstore_ref(");
+            } else {
+                out.print("\tjvm_arrstore(");
+            }
+            out.print(getArrayType(i)+", "+s(depth-2)+", "+s(depth-1)+", "+s(depth)+");");
             break;
 
         case Constants.LASTORE: case Constants.DASTORE:
             dumpNPE(out, method, code, pos, depth-3);
             dumpABE(out, method, code, pos, depth-3, depth-2, getArrayType(i));
             out.print("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
-                      " jvm_arrstore2("+getArrayType(i)+", "+s(depth-3)+", "+s(depth-2)+", a); }");
+                      " jvm_arrstore_long("+getArrayType(i)+", "+s(depth-3)+", "+s(depth-2)+", a); }");
             break;
 
         case Constants.ARRAYLENGTH:
@@ -1424,7 +1445,7 @@ public class ClassInfo {
                             " int32_t k_"+k+";"+
                             " for (k_"+k+" = 0; k_"+k+" < z_"+(k-1)+"; k_"+k+"++) {");
                 dumpNewArray(out, method, code, pos, Type.getType(sig), "z_"+k, s(depth-dim+k+1));
-                out.print(" jvm_arrstore(_int___obj_t, "+s(depth-dim+k)+", k_"+k+", "+s(depth-dim+k+1)+");");
+                out.print(" jvm_arrstore_ref(_int___obj_t, "+s(depth-dim+k)+", k_"+k+", "+s(depth-dim+k+1)+");");
             }
             for (int k = 0; k < dim; k++) {
                 out.print(" }");
@@ -1518,12 +1539,17 @@ public class ClassInfo {
         }
         String fieldName = gf.getFieldName(constPool);
         int fieldIdx = ci.getFieldIndex(fieldName);
+        dumpNPE(out, method, code, pos, depth);
         if (gf.getFieldType(constPool).getSize() == 1) {
-            dumpNPE(out, method, code, pos, depth);
-            out.print("\t"+s(depth)+" = jvm_getfield("+ci.getCObjTypeName()+", "+s(depth)+", "+fieldIdx+", "+getCFieldName(fieldName)+");");
+            out.print("\t"+s(depth)+" = ");
+            if (gf.getFieldType(constPool) instanceof ReferenceType) {
+                out.print("\tjvm_getfield_ref(");
+            } else {
+                out.print("\tjvm_getfield(");
+            }
+            out.print(ci.getCObjTypeName()+", "+s(depth)+", "+fieldIdx+", "+getCFieldName(fieldName)+");");
         } else {
-            dumpNPE(out, method, code, pos, depth);
-            out.print("\t{ int64_t a = jvm_getfield2("+ci.getCObjTypeName()+", "+s(depth)+", "+fieldIdx+", "+getCFieldName(fieldName)+");"+
+            out.print("\t{ int64_t a = jvm_getfield_long("+ci.getCObjTypeName()+", "+s(depth)+", "+fieldIdx+", "+getCFieldName(fieldName)+");"+
                       " "+s(depth)+" = (int32_t)a;"+
                       " "+s(depth+1)+" = (int32_t)(a >> 32); }");
         }
@@ -1540,11 +1566,16 @@ public class ClassInfo {
         int fieldIdx = ci.getFieldIndex(fieldName);
         if (pf.getFieldType(constPool).getSize() == 1) {
             dumpNPE(out, method, code, pos, depth-1);
-            out.print("\tjvm_putfield("+ci.getCObjTypeName()+", "+s(depth-1)+", "+fieldIdx+", "+getCFieldName(fieldName)+", "+s(depth)+");");
+            if (pf.getFieldType(constPool) instanceof ReferenceType) {
+                out.print("\tjvm_putfield_ref(");
+            } else {
+                out.print("\tjvm_putfield(");
+            }
+            out.print(ci.getCObjTypeName()+", "+s(depth-1)+", "+fieldIdx+", "+getCFieldName(fieldName)+", "+s(depth)+");");
         } else {
             dumpNPE(out, method, code, pos, depth-2);
             out.print("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
-                      " jvm_putfield2("+ci.getCObjTypeName()+", "+s(depth-2)+", "+fieldIdx+", "+getCFieldName(fieldName)+", a); }");
+                      " jvm_putfield_long("+ci.getCObjTypeName()+", "+s(depth-2)+", "+fieldIdx+", "+getCFieldName(fieldName)+", a); }");
         }
     }
 
@@ -1558,9 +1589,15 @@ public class ClassInfo {
             return;
         }
         if (gs.getFieldType(constPool).getSize() == 1) {
-            out.print("\t"+s(depth+1)+" = "+ci.getCName()+"_"+getCFieldName(fieldName)+";");
+            out.print("\t"+s(depth+1)+" = ");
+            if (gs.getFieldType(constPool) instanceof ReferenceType) {
+                out.print("jvm_getstatic_ref(");
+            } else {
+                out.print("jvm_getstatic(");
+            }
+            out.print(ci.getCName()+"_"+getCFieldName(fieldName)+");");
         } else {
-            out.print("\t{ int64_t a = "+ci.getCName()+"_"+getCFieldName(fieldName)+";"+
+            out.print("\t{ int64_t a = jvm_getstatic_long("+ci.getCName()+"_"+getCFieldName(fieldName)+");"+
                       " "+s(depth+1)+" = (int32_t)a;"+
                       " "+s(depth+2)+" = (int32_t)(a >> 32); }");
         }
@@ -1576,10 +1613,15 @@ public class ClassInfo {
             return;
         }
         if (ps.getFieldType(constPool).getSize() == 1) {
-            out.print("\t"+ci.getCName()+"_"+getCFieldName(fieldName)+" = "+s(depth)+";");
+            if (ps.getFieldType(constPool) instanceof ReferenceType) {
+                out.print("\tjvm_putstatic_ref(");
+            } else {
+                out.print("\tjvm_putstatic(");
+            }
+            out.print(ci.getCName()+"_"+getCFieldName(fieldName)+", "+s(depth)+");");
         } else {
             out.print("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";"+
-                      " "+ci.getCName()+"_"+getCFieldName(fieldName)+" = a; }");
+                      " jvm_putstatic_long("+ci.getCName()+"_"+getCFieldName(fieldName)+", a); }");
         }
     }
 

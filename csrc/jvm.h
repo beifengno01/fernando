@@ -73,12 +73,16 @@ int32_t jvm_instanceof(const _java_lang_Object_class_t *ref,
 
 #define jvm_getfield(TYPE, REF, IDX, NAME)      \
   ((const TYPE *)REF)->_ ## IDX ## _ ## NAME
-#define jvm_getfield2(TYPE, REF, IDX, NAME)     \
+#define jvm_getfield_ref(TYPE, REF, IDX, NAME)  \
+  jvm_getfield(TYPE, REF, IDX, NAME)
+#define jvm_getfield_long(TYPE, REF, IDX, NAME) \
   ((const TYPE *)REF)->_ ## IDX ## _ ## NAME
 
 #define jvm_putfield(TYPE, REF, IDX, NAME, VAL) \
   ((TYPE *)REF)->_ ## IDX ## _ ## NAME = VAL
-#define jvm_putfield2(TYPE, REF, IDX, NAME, VAL) \
+#define jvm_putfield_ref(TYPE, REF, IDX, NAME, VAL) \
+  jvm_putfield(TYPE, REF, IDX, NAME, VAL)
+#define jvm_putfield_long(TYPE, REF, IDX, NAME, VAL)    \
   ((TYPE *)REF)->_ ## IDX ## _ ## NAME = VAL
 
 #define jvm_arrlength(TYPE, REF)                \
@@ -88,13 +92,31 @@ int32_t jvm_instanceof(const _java_lang_Object_class_t *ref,
 
 #define jvm_arrload(TYPE, REF, IDX)             \
   (&((const TYPE *)REF)->_1_data[0])[IDX]
-#define jvm_arrload2(TYPE, REF, IDX)            \
+#define jvm_arrload_ref(TYPE, REF, IDX)         \
+  jvm_arrload(TYPE, REF, IDX)
+#define jvm_arrload_long(TYPE, REF, IDX)        \
   (&((const TYPE *)REF)->_1_data[0])[IDX]
 
 #define jvm_arrstore(TYPE, REF, IDX, VAL)       \
   (&((TYPE *)REF)->_1_data[0])[IDX] = VAL
-#define jvm_arrstore2(TYPE, REF, IDX, VAL)      \
+#define jvm_arrstore_ref(TYPE, REF, IDX, VAL)   \
+  jvm_arrstore(TYPE, REF, IDX, VAL)
+#define jvm_arrstore_long(TYPE, REF, IDX, VAL)  \
   (&((TYPE *)REF)->_1_data[0])[IDX] = VAL
+
+#define jvm_getstatic(NAME)                     \
+  NAME
+#define jvm_getstatic_ref(NAME)                 \
+  jvm_getstatic(NAME)
+#define jvm_getstatic_long(NAME)                \
+  NAME
+
+#define jvm_putstatic(NAME, VAL)                \
+  NAME = VAL
+#define jvm_putstatic_ref(NAME, VAL)            \
+  jvm_putstatic(NAME, VAL)
+#define jvm_putstatic_long(NAME, VAL)           \
+  NAME = VAL
 
 #if defined(__gcc__)
 #define ALLOC_ATTRIBS __attribute__((returns_nonnull,malloc))
