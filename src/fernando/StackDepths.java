@@ -32,35 +32,26 @@
 
 package fernando;
 
-import org.apache.bcel.generic.BranchInstruction;
-import org.apache.bcel.generic.ConstantPoolGen;
-import org.apache.bcel.generic.Instruction;
-import org.apache.bcel.generic.InstructionList;
-import org.apache.bcel.generic.ReturnInstruction;
-import org.apache.bcel.generic.Select;
-import org.apache.bcel.generic.UnconditionalBranch;
+import org.apache.bcel.generic.*;
 
 import java.util.Map;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Queue;
 
+/**
+ * A simple data flow analysis to determine the depth of the operand stack.
+ */
 public class StackDepths {
+
+    /** A map between code positions and computed stack depths. */
     private final Map<Integer, Integer> depthMap = new HashMap<Integer, Integer>();
 
-    public int get(int pos) {
-        return depthMap.get(pos);
-    }
-
-    private int findUndefinedDepthPos(InstructionList il) {
-        for (int pos : il.getInstructionPositions()) {
-            if (!depthMap.containsKey(pos)) {
-                return pos;
-            }
-        }
-        return -1;
-    }
-
+    /**
+     * Create and run the analysis.
+     * @param il The list of instructions to be analyzed
+     * @param constPool The constant pool for the instructions
+     */
     public StackDepths(InstructionList il, ConstantPoolGen constPool) {
 
         Queue<Integer> queue = new LinkedList<Integer>();
@@ -79,34 +70,68 @@ public class StackDepths {
                     - i.consumeStack(constPool)
                     + i.produceStack(constPool);
                 
-                if (i instanceof Select) {
-                    Select s = (Select)i;
-                    for (int idx : s.getIndices()) {
-                        Integer target = pos + idx;
-                        if (!depthMap.containsKey(target)) {
-                            depthMap.put(target, depth);
-                            queue.add(target);
-                        }
-                    }
-                } 
-                if (i instanceof BranchInstruction) {
-                    BranchInstruction bi = (BranchInstruction)i;
-                    Integer target = pos + bi.getIndex();
-                    if (!depthMap.containsKey(target)) {
-                        depthMap.put(target, depth);
-                        queue.add(target);
-                    }
-                }
-                if (!(i instanceof ReturnInstruction ||
-                      i instanceof UnconditionalBranch)) {
-                    Integer next = pos + i.getLength();
-                    depthMap.put(next, depth);
-                    queue.add(next);
-                }
+                updateQueue(queue, pos, i, depth);
             }
 
             depth = 0;
             pos = findUndefinedDepthPos(il);
         }
+    }
+
+    /**
+     * Store current analysis information and update the queue of positions to be analyzed.
+     * @param queue The queue of positions to be analyzed
+     * @param pos The current position in the code
+     * @param i The current instruction
+     * @param depth The computed stack depth
+     */
+    private void updateQueue(Queue<Integer> queue, int pos, Instruction i, int depth) {
+
+        if (i instanceof Select) {
+            Select s = (Select)i;
+            for (int idx : s.getIndices()) {
+                Integer target = pos + idx;
+                if (!depthMap.containsKey(target)) {
+                    depthMap.put(target, depth);
+                    queue.add(target);
+                }
+            }
+        } 
+        if (i instanceof BranchInstruction) {
+            BranchInstruction bi = (BranchInstruction)i;
+            Integer target = pos + bi.getIndex();
+            if (!depthMap.containsKey(target)) {
+                depthMap.put(target, depth);
+                queue.add(target);
+            }
+        }
+        if (!(i instanceof ReturnInstruction ||
+              i instanceof UnconditionalBranch)) {
+            Integer next = pos + i.getLength();
+            depthMap.put(next, depth);
+            queue.add(next);
+        }
+    }
+
+    /**
+     * Find a position that has not been analyzed yet.
+     * @return A position that has not yet been analyzed, -1 if all positions have been analyzed.
+     */
+    private int findUndefinedDepthPos(InstructionList il) {
+        for (int pos : il.getInstructionPositions()) {
+            if (!depthMap.containsKey(pos)) {
+                return pos;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Get the depth of the stack at a particular position in the code.
+     * @param pos The position in the code
+     * @return The depth of the stack
+     */
+    public int get(int pos) {
+        return depthMap.get(pos);
     }
 }

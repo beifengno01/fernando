@@ -37,7 +37,19 @@ import org.apache.bcel.classfile.FieldOrMethod;
 import java.util.LinkedList;
 import java.util.List;
 
+/**
+ * A simple class to filter lists of fields or methods.
+ */
 public class Filter {
+    // hide default constructor
+    private Filter() {
+    }
+
+    /**
+     * Filter list of fields and methods, keeping only instance fields or methods.
+     * @param list The original list of fields or methods
+     * @return The filtered list of fields or methods
+     */
     public static <T extends FieldOrMethod> List<T> instances(List<T> list) {
         List<T> retval = new LinkedList<T>();
         for (T f : list) {
@@ -47,6 +59,12 @@ public class Filter {
         }
         return retval;
     }
+
+    /**
+     * Filter list of fields and methods, keeping only static fields or methods.
+     * @param list The original list of fields or methods
+     * @return The filtered list of fields or methods
+     */
     public static <T extends FieldOrMethod> List<T> statics(List<T> list) {
         List<T> retval = new LinkedList<T>();
         for (T f : list) {

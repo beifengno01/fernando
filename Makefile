@@ -28,7 +28,7 @@ APPCSRC=$(shell find ${APPOUTPATH}/classes -name "*.c")
 CC=gcc
 CFLAGS=-m32 -O3 -std=c99 -pedantic -Wall -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function -Wno-unused-but-set-variable -flto -fwhole-program
 
-all: build
+all: build doc
 
 tool: ${CLASS}
 
@@ -62,7 +62,11 @@ ${APPOUTPATH}/${APPEXENAME}: ${APPOUTPATH}/main.c ${APPCSRC} ${CSRCPATH}/${NATIV
 run:
 	./${APPOUTPATH}/${APPEXENAME}
 
-clean: cleantool cleanapp cleansdk
+doc: ${SRC}
+	@mkdir -p doc
+	javadoc -d doc/javadoc -classpath ${CLASSPATH} -sourcepath ${SRCPATH} fernando
+
+clean: cleantool cleanapp cleansdk cleandoc
 
 cleantool:
 	rm -rf ${OUTPATH}
@@ -73,6 +77,9 @@ cleanapp:
 cleansdk:
 	rm -rf ${SDKOUTPATH}
 
+cleandoc:
+	rm -rf doc/javadoc
+
 help:
 	@echo "Available make targets:"
 	@echo "all        build everything (default)"
@@ -82,10 +89,12 @@ help:
 	@echo "xlate      translate Java application to C code"
 	@echo "build      compile C code"
 	@echo "run        run application"
+	@echo "doc        generate documentation"
 	@echo "clean      clean everything"
 	@echo "cleantool  clean C code generator"
 	@echo "cleansdk   clean Java class library"
 	@echo "cleanapp   clean Java application and generated C code"
+	@echo "cleandoc   clean documentation"
 	@echo "help       print this message"
 
-.PHONY: all tool sdk app xlate build run clean cleantool cleanapp cleansdk help
+.PHONY: all tool sdk app xlate build run doc clean cleantool cleanapp cleansdk help

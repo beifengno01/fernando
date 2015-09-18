@@ -34,13 +34,7 @@ package fernando;
 
 import org.apache.bcel.classfile.Code;
 import org.apache.bcel.classfile.Method;
-import org.apache.bcel.generic.ConstantPoolGen;
-import org.apache.bcel.generic.CPInstruction;
-import org.apache.bcel.generic.FieldOrMethod;
-import org.apache.bcel.generic.Instruction;
-import org.apache.bcel.generic.InstructionList;
-import org.apache.bcel.generic.InvokeInstruction;
-import org.apache.bcel.generic.Type;
+import org.apache.bcel.generic.*;
 
 import java.util.Set;
 import java.util.List;
@@ -48,14 +42,34 @@ import java.util.LinkedList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.logging.Logger;
 
+/**
+ * A class to sort class initializers according to the order in which
+ * their class initializers should be called.
+ */
 public class ClassInitOrder {
 
+    /** A map between class names and classes. */
     private Map<String, ClassInfo> classInfoMap;
+
+    /** A helper structure for traversing the object graph. */
+    private Set<Method> visited = new LinkedHashSet<Method>();
+
+    /**
+     * Constructor.
+     * @param classInfoMap A map between class names and classes for
+     * all classes in the application.
+     */
     public ClassInitOrder(Map<String, ClassInfo> classInfoMap) {
         this.classInfoMap = classInfoMap;
     }
 
+    /**
+     * Find a valid order for the class initializers.
+     * @return A list of classes that is sorted according to the order
+     * in which their class initializers should be called.
+     */
     public List<ClassInfo> findOrder() {
         List<ClassInfo> order = new LinkedList<ClassInfo>();
         Map<ClassInfo, Set<ClassInfo>> depGraph = new LinkedHashMap<ClassInfo, Set<ClassInfo>>();
@@ -68,30 +82,45 @@ public class ClassInitOrder {
             for (Map.Entry<ClassInfo, Set<ClassInfo>> e : depGraph.entrySet()) {
                 Set<ClassInfo> val = e.getValue();
                 if (val.isEmpty()) {
-                    ClassInfo key = e.getKey();
-                    order.add(key);
-                    for (Set<ClassInfo> d : depGraph.values()) {
-                        d.remove(key);
-                    }
-                    depGraph.remove(key);
+                    updateOrder(order, depGraph, e.getKey());
                     break;
                 }
             }
         }
         if (!depGraph.isEmpty()) {
-            System.err.println("Cyclic class initializer dependency!");
+            Logger.getGlobal().severe("Cyclic class initializer dependency!");
             for (Map.Entry<ClassInfo, Set<ClassInfo>> e : depGraph.entrySet()) {
-                System.err.print(e.getKey().getName()+" depends on");
+                String msg = e.getKey().getName()+" depends on";
                 for (ClassInfo d : e.getValue()) {
-                    System.err.print(" "+d.getName());
+                    msg += " "+d.getName();
                 }
-                System.err.println();
+                Logger.getGlobal().severe(msg);
                 order.add(e.getKey());
             }
         }
         return order;
     }
 
+    /**
+     * A helper function to append a class to the order and remove it
+     * from the dependency graph.
+     * @param order The order of classes so far
+     * @param depGraph The dependency graph
+     * @param clazz The class to be appended to the order
+     */
+    private void updateOrder(List<ClassInfo> order, Map<ClassInfo, Set<ClassInfo>> depGraph, ClassInfo clazz) {
+        order.add(clazz);
+        for (Set<ClassInfo> d : depGraph.values()) {
+            d.remove(clazz);
+        }
+        depGraph.remove(clazz);
+    }
+
+    /**
+     * Find the dependencies of a class initializer.
+     * @param clazz The class containing the class initializer to be analyzed
+     * @return The set of classes that this class initializer depends on
+     */
     public Set<ClassInfo> findDeps(ClassInfo clazz) {
         Set<ClassInfo> deps = new LinkedHashSet<ClassInfo>();
         Method clinit = clazz.findClinit();
@@ -101,9 +130,13 @@ public class ClassInitOrder {
         return deps;
     }
 
-    private Set<Method> visited = new LinkedHashSet<Method>();
-
-    public Set<ClassInfo> findDeps(ClassInfo clazz, Method m) {
+    /**
+     * Find the dependencies of a class, starting at a particular method.
+     * @param clazz The class to be analyzed
+     * @param m The method to be analyzed
+     * @return The set of classes that the current class depends on
+     */
+    private Set<ClassInfo> findDeps(ClassInfo clazz, Method m) {
         Set<ClassInfo> deps = new LinkedHashSet<ClassInfo>();
         visited.add(m);
 
@@ -114,36 +147,57 @@ public class ClassInitOrder {
             if (i instanceof CPInstruction) {
                 Type type = ((CPInstruction)i).getType(constPool);
                 ClassInfo ci = ClassInfo.getClassInfo(type.toString());
-                if (ci != null && ci != clazz && ci.findClinit() != null) {
-                    deps.add(ci);
-                }
+                addDep(deps, clazz, ci);
             }
             if (i instanceof FieldOrMethod) {
-                FieldOrMethod fom = (FieldOrMethod)i;
-                Type type = fom.getReferenceType(constPool);
+                Type type = ((FieldOrMethod)i).getReferenceType(constPool);
                 ClassInfo ci = ClassInfo.getClassInfo(type.toString());
-                if (ci != null && ci != clazz && ci.findClinit() != null) {
-                    deps.add(ci);
-                }
+                addDep(deps, clazz, ci);
                 if (ci != null && i instanceof InvokeInstruction) {
                     InvokeInstruction ii = (InvokeInstruction)i;
-                    for (Method im : ci.getMethods()) {
-                        if (im.getName().equals(ii.getMethodName(constPool)) &&
-                            im.getSignature().equals(ii.getSignature(constPool)) &&
-                            !visited.contains(im) &&
-                            im.getCode() != null) {
-                            Set<ClassInfo> subDeps = findDeps(ci, im);
-                            for (ClassInfo d : subDeps) {
-                                if (d != clazz) {
-                                    deps.add(d);
-                                }
-                            }
-                        }
-                    }
+                    String name = ii.getMethodName(constPool);
+                    String signature = ii.getSignature(constPool);
+                    deps.addAll(findInvokeDeps(clazz, ci, name, signature));
                 }
             }
         }
         return deps;
     }
 
+    /**
+     * Find the dependencies incurred by a method invocation.
+     * @param clazz The class to be analyzed
+     * @param calledClass The class that is being called
+     * @param name The name of the invoked method
+     * @param name The signature of the invoked method     
+     * @return The set of classes that the current class depends on
+     */
+    private Set<ClassInfo> findInvokeDeps(ClassInfo clazz, ClassInfo calledClazz, String name, String signature) {
+        Set<ClassInfo> deps = new LinkedHashSet<ClassInfo>();
+        for (Method m : calledClazz.getMethods()) {
+            if (m.getName().equals(name) &&
+                m.getSignature().equals(signature) &&
+                !visited.contains(m) &&
+                m.getCode() != null) {
+
+                Set<ClassInfo> subDeps = findDeps(calledClazz, m);
+                subDeps.remove(clazz);
+                deps.addAll(subDeps);
+            }
+        }
+        return deps;
+    }
+
+    /**
+     * Add a dependency, skipping classes that are identical or do not
+     * have a class initializer.
+     * @param deps The set of dependencies
+     * @param clazz The current class
+     * @param depClazz The class the current class depends on
+     */
+    private void addDep(Set<ClassInfo> deps, ClassInfo clazz, ClassInfo depClazz) {
+        if (depClazz != null && depClazz != clazz && depClazz.findClinit() != null) {
+            deps.add(depClazz);
+        }
+    }
 }

@@ -33,29 +33,49 @@
 package fernando;
 
 import org.apache.bcel.Repository;
-import org.apache.bcel.classfile.JavaClass;
-import org.apache.bcel.classfile.Method;
 import org.apache.bcel.util.SyntheticRepository;
 
 import java.io.InputStream;
 import java.io.IOException;
 
-import java.util.Map;
-
-// patched version of BCEL's ClassPath that ignores the class loader
+/**
+ * A patched version of BCEL's ClassPath that ignores the class loader.
+ */
 class ClassPath extends org.apache.bcel.util.ClassPath {
+    /**
+     * Create a new ClassPath
+     * @param path The path to the classes
+     */
     public ClassPath(String path) {
         super(path);
     }
+    /**
+     * Get input stream for class file with name and suffix
+     * @param name The name of the class file
+     * @param suffix The suffix of the class file
+     */
     public InputStream getInputStream(String name, String suffix) throws IOException {
         return getClassFile(name, suffix).getInputStream();
     }
 }
 
+/**
+ * The main class of Fernando.
+ */
 public class Main {
-    public static void main(String [] args) {
+    // hide default constructor
+    private Main() {
+    }
+
+    /**
+     * The usual main method.
+     * @param args The command line arguments. The first argument is
+     * the class path, the second argument the name of the main class,
+     * and the third argument the directory where to generate files.
+     */
+    public static void main(String [] args) throws ClassNotFoundException, IOException {
         if (args.length != 3) {
-            System.err.println("Usage: java fernando.Main <classpath> <mainclass> <file>");
+            System.err.println("Usage: java fernando.Main <classpath> <mainclass> <directory>");
             System.exit(-1);
         }
 

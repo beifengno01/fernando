@@ -33,58 +33,12 @@
 package fernando;
 
 import org.apache.bcel.Constants;
-import org.apache.bcel.classfile.Code;
-import org.apache.bcel.classfile.CodeException;
-import org.apache.bcel.classfile.Constant;
-import org.apache.bcel.classfile.ConstantClass;
-import org.apache.bcel.classfile.ConstantDouble;
-import org.apache.bcel.classfile.ConstantFloat;
-import org.apache.bcel.classfile.ConstantInteger;
-import org.apache.bcel.classfile.ConstantLong;
-import org.apache.bcel.classfile.ConstantString;
-import org.apache.bcel.classfile.ConstantUtf8;
-import org.apache.bcel.classfile.ConstantValue;
-import org.apache.bcel.classfile.ExceptionTable;
-import org.apache.bcel.classfile.Field;
-import org.apache.bcel.classfile.JavaClass;
-import org.apache.bcel.classfile.Method;
-import org.apache.bcel.generic.BasicType;
-import org.apache.bcel.generic.BranchInstruction;
-import org.apache.bcel.generic.ConstantPoolGen;
-import org.apache.bcel.generic.ConstantPushInstruction;
-import org.apache.bcel.generic.GotoInstruction;
-import org.apache.bcel.generic.Instruction;
-import org.apache.bcel.generic.InstructionHandle;
-import org.apache.bcel.generic.InstructionList;
-import org.apache.bcel.generic.InvokeInstruction;
-import org.apache.bcel.generic.LoadInstruction;
-import org.apache.bcel.generic.ObjectType;
-import org.apache.bcel.generic.ReturnInstruction;
-import org.apache.bcel.generic.Select;
-import org.apache.bcel.generic.StoreInstruction;
-import org.apache.bcel.generic.Type;
-import org.apache.bcel.generic.ReferenceType;
-import org.apache.bcel.generic.UnconditionalBranch;
-import org.apache.bcel.generic.ANEWARRAY;
-import org.apache.bcel.generic.ATHROW;
-import org.apache.bcel.generic.CHECKCAST;
-import org.apache.bcel.generic.GETFIELD;
-import org.apache.bcel.generic.GETSTATIC;
-import org.apache.bcel.generic.IINC;
-import org.apache.bcel.generic.INSTANCEOF;
-import org.apache.bcel.generic.LDC;
-import org.apache.bcel.generic.LDC2_W;
-import org.apache.bcel.generic.MULTIANEWARRAY;
-import org.apache.bcel.generic.NEW;
-import org.apache.bcel.generic.NEWARRAY;
-import org.apache.bcel.generic.PUTFIELD;
-import org.apache.bcel.generic.PUTSTATIC;
-import org.apache.bcel.util.ByteSequence;
+import org.apache.bcel.classfile.*;
+import org.apache.bcel.generic.*;
 
 import java.io.PrintWriter;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileWriter;
 import java.io.IOException;
 
@@ -97,18 +51,61 @@ import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Logger;
 
+/**
+ * {@link ClassInfo} holds information about a class and the
+ * application and implements functions to generate C code.
+ */
 public class ClassInfo {
 
+    /** The name of the class. */
+    private final String name;
+    /** The BCEL representation of  the class. */
+    private final JavaClass clazz;
+    /** The constant pool of the class. */
+    private final ConstantPoolGen constPool;
+
+    /** A helper structure to memoize the instance methods and the
+     * classes that implement them. */
+    private List<Map.Entry<Method, ClassInfo>> instanceMethods;
+    /** A helper structure to compute which methods are truly virtual. */
+    private static Set<String> virtualMethods;
+
+    /** The name of the class that contains the main method. */
     private static String entryClass;
+    
+    /** A map between class names and classes. */
     private static Map<String, ClassInfo> classInfoMap = new LinkedHashMap<String, ClassInfo>();
+
+    /** The list of interfaces in the application. */
     private static List<ClassInfo> interfaceList = new LinkedList<ClassInfo>();
 
+    /**
+     * Constructor, only to be used internally.
+     */
+    private ClassInfo(String name, JavaClass clazz) {
+        this.name = name;
+        this.clazz = clazz;
+        this.constPool = new ConstantPoolGen(clazz.getConstantPool());
+    }
+
+    /**
+     * Find class info for a name.
+     * @param name The name of the class to find
+     * @return The class info for the name
+     */
     public static ClassInfo getClassInfo(String name) {
         return classInfoMap.get(name);
     }
 
-    public static void loadHull(String entry) {
+    /** 
+     * Load the transitive hull of the application, including classes
+     * that are used by the JVM such as {@link java.lang.NullPointerException}.
+     * @param entry The name of the entry class
+     * @throws ClassNotFoundException if some referenced class cannot be found
+     */
+    public static void loadHull(String entry) throws ClassNotFoundException {
         Hull hull = new Hull();
         hull.add("[Z");
         hull.add("[B");
@@ -141,64 +138,110 @@ public class ClassInfo {
         entryClass = entry.replace('/', '.');
     }
 
-    private final String name;
-    private final JavaClass clazz;
-    private final ConstantPoolGen constPool;
-
-    private ClassInfo(String name, JavaClass clazz) {
-        this.name = name;
-        this.clazz = clazz;
-        this.constPool = new ConstantPoolGen(clazz.getConstantPool());
-    }
-
+    /**
+     * Get the name of this class.
+     * @return The name of the class
+     */
     public String getName() {
         return name;
     }
+    /**
+     * Get the constant pool of this class.
+     * @return The constant pool of the class
+     */
     public ConstantPoolGen getConstPool() {
         return constPool;
     }
 
+    /**
+     * Escape all special characters so it can be used as identifier in C.
+     * @param name The original name
+     * @return The escaped name
+     */
     private static String escapeName(String name) {
         return name.replaceAll("[./<>();\\[\\]\\$]", "_");
     }
+
+    /**
+     * Get the name of the class to be used in the C code.
+     * @return The name of the class to be used in the C code
+     */
     public String getCName() {
         return escapeName("_"+getName());
     }
+
+    /**
+     * Get the name of the C type that represents this class.
+     * @return The name of the C type that represents the class
+     */
     public String getCClassTypeName() {
         return getCName() + "_class_t";
     }
+
+    /**
+     * Get the name of the C type that represents instances of this class.
+     * @return The name of the C type that represents instances of the class
+     */
     public String getCObjTypeName() {
         return getCName() + "_obj_t";
     }
-    public static String getCMethName(Method m) {
+
+    /**
+     * Get the name (and signature) of a method in a form that can be used in C.
+     * @param m The method
+     * @return The escaped name (and signature)
+     */
+    private static String getCMethName(Method m) {
         return escapeName(m.getName()+m.getSignature());
     }
+
+    /**
+     * Get the name of a field in a form that can be used in C.
+     * @param name The field name
+     * @return The escaped name
+     */
     private static String getCFieldName(String name) {
         return name.replaceAll("[\\$]", "_");
     }
 
+    /**
+     * Get the name of the C type that represents a Java type.
+     * @param type The Java type
+     * @return The C type
+     */
     public static String getCType(Type type) {
+        String cType = null;
         switch (type.getType()) {
         case Constants.T_VOID:
-            return "void";
+            cType = "void";
+            break;
         case Constants.T_BOOLEAN:
         case Constants.T_BYTE:
-            return "int8_t";
+            cType = "int8_t";
+            break;
         case Constants.T_CHAR:
-            return "uint16_t";
+            cType = "uint16_t";
+            break;
         case Constants.T_SHORT:
-            return "int16_t";
+            cType = "int16_t";
+            break;
         case Constants.T_LONG:
         case Constants.T_DOUBLE:
-            return "int64_t";
+            cType = "int64_t";
+            break;
         case Constants.T_INT:
         case Constants.T_FLOAT:
         case Constants.T_OBJECT:
         default:
-            return "int32_t";
+            cType = "int32_t";
         }
+        return cType;
     }
 
+    /**
+     * Get the super class of this class.
+     * @return The super class of the class
+     */
     public ClassInfo getSuperClass() {
         ClassInfo superClass = getClassInfo(clazz.getSuperclassName());
         if (superClass == this) {
@@ -208,31 +251,13 @@ public class ClassInfo {
         }
     }
 
-    public boolean instanceOf(ClassInfo ci) {
-        boolean retval = false;
-        try {
-            retval = clazz.instanceOf(ci.clazz);
-        } catch (ClassNotFoundException exc) {
-            System.err.println(exc);
-            System.exit(-1);
-        }
-        return retval;
-    }
-
-    public boolean implementationOf(ClassInfo ci) {
-        boolean retval = false;
-        try {
-            retval = clazz.implementationOf(ci.clazz);
-        } catch (ClassNotFoundException exc) {
-            System.err.println(exc);
-            System.exit(-1);
-        }
-        return retval;
-    }
-
+    /**
+     * Get the interfaces implemented by this class.
+     * @return The set of interfaces implemented by this class
+     */
     public Set<ClassInfo> getInterfaces() {
         Set<ClassInfo> interfaces = new LinkedHashSet<ClassInfo>();
-        LinkedList<ClassInfo> queue = new LinkedList<ClassInfo>();
+        Deque<ClassInfo> queue = new LinkedList<ClassInfo>();
         queue.add(this);
         while (!queue.isEmpty()) {
             ClassInfo ci = queue.remove();
@@ -251,10 +276,18 @@ public class ClassInfo {
         return interfaces;
     }
 
+    /**
+     * Get the fields declared by this class.
+     * @return The list of fields declared by this class
+     */
     public List<Field> getFields() {
         return Arrays.asList(clazz.getFields());
     }
 
+    /**
+     * Get the instance fields of this class, including fields declared by super classes.
+     * @return The list of instance fields of the class
+     */
     public List<Field> getInstanceFields() {
         List<Field> fields = new LinkedList<Field>();
 
@@ -268,7 +301,12 @@ public class ClassInfo {
         return fields;
     }
 
-    public boolean declaresField(String name) {
+    /**
+     * Check whether this class declares a field.
+     * @param name The name of the field
+     * @return true if the class declares the field, false otherwise
+     */
+    private boolean declaresField(String name) {
         List<Field> fields = getFields();
         for (Field f : fields) {
             if (f.getName().equals(name)) {
@@ -278,18 +316,30 @@ public class ClassInfo {
         return false;
     }
 
+    /**
+     * Find the class that declares a field.
+     * @param base The class to start the search
+     * @param name The field to look up
+     * @return The class that declares the field
+     */
     public ClassInfo findFieldDeclarator(ClassInfo base, String name) {
-        while (base != null && !base.declaresField(name)) {
-            for (ClassInfo c : base.getInterfaces()) {
+        ClassInfo b = base;
+        while (b != null && !b.declaresField(name)) {
+            for (ClassInfo c : b.getInterfaces()) {
                 if (c.declaresField(name)) {
                     return c;
                 }
             }
-            base = base.getSuperClass();
+            b = b.getSuperClass();
         }
-        return base;
+        return b;
     }
 
+    /**
+     * Get the index of a field.
+     * @param name The name of the field
+     * @return The offset of the field, relative to the first field
+     */
     public int getFieldIndex(String name) {
         List<Field> fields = getInstanceFields();
         int i;
@@ -308,11 +358,21 @@ public class ClassInfo {
         return idx;
     }
 
+    /**
+     * Get the methods of this class.
+     * @return The list of methods
+     */
     public List<Method> getMethods() {
         return Arrays.asList(clazz.getMethods());
     }
 
-    public boolean declaresMethod(String name, String signature) {
+    /**
+     * Check whether the class declares a method.
+     * @param name The name of the method
+     * @param signature The signature of the method
+     * @return true if the class declares the method, false otherwise
+     */
+    private boolean declaresMethod(String name, String signature) {
         for (Method m : getMethods()) {
             if (m.getName().equals(name)
                 && m.getSignature().equals(signature)) {
@@ -322,30 +382,38 @@ public class ClassInfo {
         return false;
     }
 
+    /**
+     * Find the class that declares a method.
+     * @param name The name of the method
+     * @param signature The signature of the method
+     * @return The class that declares the method
+     */
     public ClassInfo findMethodDeclarator(ClassInfo base, String name, String signature) {
-        while (base != null && !base.declaresMethod(name, signature)) {
-            for (ClassInfo c : base.getInterfaces()) {
+        ClassInfo b = base;
+        while (b != null && !b.declaresMethod(name, signature)) {
+            for (ClassInfo c : b.getInterfaces()) {
                 if (c.declaresMethod(name, signature)) {
                     return c;
                 }
             }
-            base = base.getSuperClass();
+            b = b.getSuperClass();
         }
-        return base;
+        return b;
     }
 
+    /**
+     * Find the class initializer method.
+     * @return The method for the class initializer
+     */
     public Method findClinit() {
         for (Method m : clazz.getMethods()) {
-            if (m.getName().equals("<clinit>")
-                && m.getSignature().equals("()V")) {
+            if ("<clinit>".equals(m.getName())
+                && "()V".equals(m.getSignature())) {
                 return m;
             }
         }
         return null;
     }
-
-    private List<Map.Entry<Method, ClassInfo>> instanceMethods;
-    private static Set<String> virtualMethods;
 
     private void addMethodToList(List<Map.Entry<Method, ClassInfo>> list, Method m, ClassInfo ci, boolean replace) {
         boolean override = false;
@@ -372,6 +440,9 @@ public class ClassInfo {
         }
     }
 
+    /**
+     * Compute the instance methods of a class and store them in {@link instanceMethods}.
+     */
     private void computeInstanceMethods() {
         instanceMethods = new LinkedList<Map.Entry<Method, ClassInfo>>();
         ClassInfo superClass = getSuperClass();
@@ -394,6 +465,10 @@ public class ClassInfo {
         }
     }
 
+    /**
+     * Get the instance methods of this class.
+     * @return The list of methods and the classes that implement them
+     */
     public List<Map.Entry<Method, ClassInfo>> getInstanceMethods() {
         if (instanceMethods == null) {
             computeInstanceMethods();
@@ -401,6 +476,10 @@ public class ClassInfo {
         return instanceMethods;
     }
 
+    /**
+     * Get the truly virtual methods of this class.
+     * @return The set of truly virtual methods of this class
+     */
     public Set<String> getVirtualMethods() {
         if (virtualMethods == null) {
             virtualMethods = new LinkedHashSet<String>();
@@ -411,17 +490,25 @@ public class ClassInfo {
         return virtualMethods;
     }
 
+    /**
+     * Compare whether two methods are equal according to their name and signature.
+     * @return true if the methods are equals, false otherwise
+     */
     public static boolean methodsEqual(Method a, Method b) {
         return a.getName().equals(b.getName()) &&
             a.getSignature().equals(b.getSignature());
     }
 
-    public boolean needsInterfaceTable() {
+    /**
+     * Compute whether the class requires an interface table.
+     * @return true if the current class requires an interface table, false otherwise
+     */
+    public boolean needsInterfaceTable() throws ClassNotFoundException {
         if (clazz.isInterface() || clazz.isAbstract() || getInterfaces().isEmpty()) {
             return false;
         }
         for (ClassInfo i : interfaceList) {
-            if (implementationOf(i)) {
+            if (clazz.implementationOf(i.clazz)) {
                 for (Method m : i.getMethods()) {
                     for (Map.Entry<Method, ClassInfo> e : getInstanceMethods()) {
                         if (methodsEqual(m, e.getKey())) {
@@ -434,6 +521,12 @@ public class ClassInfo {
         return false;
     }
 
+    /**
+     * Get the number of arguments for a C function.
+     * @param types The types of the arguments
+     * @param isStatic Whether the corresponding methid is static
+     * @return The number of arguments for a C function
+     */
     private static int getArgCount(Type [] types, boolean isStatic) {
         int count = 0;
         for (Type t : types) {
@@ -445,95 +538,172 @@ public class ClassInfo {
         return count;
     }
 
+    /**
+     * Get the C operator for an arithmetic bytecode.
+     * @param i The bytecode
+     * @return The C operator
+     */
     private static String getArithOp(Instruction i) {
+        String op = null;
         switch (i.getOpcode()) {
         case Constants.IADD: case Constants.LADD: 
-        case Constants.FADD: case Constants.DADD: return "+";
+        case Constants.FADD: case Constants.DADD:
+            op = "+";
+            break;
         case Constants.ISUB: case Constants.LSUB:
-        case Constants.FSUB: case Constants.DSUB: return "-";
+        case Constants.FSUB: case Constants.DSUB:
+            op = "-";
+            break;
         case Constants.IMUL: case Constants.LMUL:
-        case Constants.FMUL: case Constants.DMUL: return "*";
+        case Constants.FMUL: case Constants.DMUL:
+            op = "*";
+            break;
         case Constants.IDIV: case Constants.LDIV:
-        case Constants.FDIV: case Constants.DDIV: return "/";
-        case Constants.IREM: case Constants.LREM: return "%";
-        case Constants.IOR:  case Constants.LOR:  return "|";
-        case Constants.IAND: case Constants.LAND: return "&";
-        case Constants.IXOR: case Constants.LXOR: return "^";
-        case Constants.ISHL: case Constants.LSHL: return "<<";
+        case Constants.FDIV: case Constants.DDIV:
+            op = "/";
+            break;
+        case Constants.IREM: case Constants.LREM:
+            op = "%";
+            break;
+        case Constants.IOR:  case Constants.LOR:
+            op = "|";
+            break;
+        case Constants.IAND: case Constants.LAND:
+            op = "&";
+            break;
+        case Constants.IXOR: case Constants.LXOR:
+            op = "^";
+            break;
+        case Constants.ISHL: case Constants.LSHL:
+            op = "<<";
+            break;
         case Constants.ISHR: case Constants.LSHR:
-        case Constants.IUSHR: case Constants.LUSHR: return ">>";
+        case Constants.IUSHR: case Constants.LUSHR:
+            op = ">>";
+            break;
         default:
-            System.err.println("Invalid arithmetic instruction: "+i);
-            System.exit(-1);
-            return null;
+            throw new IllegalArgumentException("Invalid arithmetic instruction: "+i);
         }
+        return op;
     }
+
+    /**
+     * Get the C comparison operator for a comparison bytecode.
+     * @param i The bytecode
+     * @return The C operator
+     */
     private static String getCondition(Instruction i) {
+        String cond = null;
         switch (i.getOpcode()) {
         case Constants.IFNONNULL: case Constants.IFNE:
-        case Constants.IF_ACMPNE: case Constants.IF_ICMPNE: return "!=";
+        case Constants.IF_ACMPNE: case Constants.IF_ICMPNE:
+            cond = "!=";
+            break;
         case Constants.IFNULL: case Constants.IFEQ:
-        case Constants.IF_ACMPEQ: case Constants.IF_ICMPEQ: return "==";
-        case Constants.IFGE: case Constants.IF_ICMPGE: return ">=";
-        case Constants.IFLT: case Constants.IF_ICMPLT: return "<";
-        case Constants.IFGT: case Constants.IF_ICMPGT: return ">";
-        case Constants.IFLE: case Constants.IF_ICMPLE: return "<=";
+        case Constants.IF_ACMPEQ: case Constants.IF_ICMPEQ:
+            cond = "==";
+            break;
+        case Constants.IFGE: case Constants.IF_ICMPGE:
+            cond = ">=";
+            break;
+        case Constants.IFLT: case Constants.IF_ICMPLT:
+            cond = "<";
+            break;
+        case Constants.IFGT: case Constants.IF_ICMPGT:
+            cond = ">";
+            break;
+        case Constants.IFLE: case Constants.IF_ICMPLE:
+            cond = "<=";
+            break;
         default:
-            System.err.println("Invalid comparison instruction: "+i);
-            System.exit(-1);
-            return null;
+            throw new IllegalArgumentException("Invalid comparison instruction: "+i);
         }
+        return cond;
     }
+
+    /**
+     * Get the C comparison for a comparison bytecode.
+     * @param i The bytecode
+     * @param depth The current stack depth
+     * @return The C comparison
+     */
     private static String getComparison(Instruction i, int depth) {
+        String comp = null;
         switch (i.getOpcode()) {
         case Constants.IFNONNULL: case Constants.IFNE:
         case Constants.IFNULL: case Constants.IFEQ:
         case Constants.IFGE: case Constants.IFLT:
         case Constants.IFGT: case Constants.IFLE:
-            return s(depth)+" "+getCondition(i)+" 0";
+            comp = s(depth)+" "+getCondition(i)+" 0";
+            break;
         case Constants.IF_ACMPNE: case Constants.IF_ICMPNE:
         case Constants.IF_ACMPEQ: case Constants.IF_ICMPEQ:        
         case Constants.IF_ICMPGE: case Constants.IF_ICMPLT:
         case Constants.IF_ICMPGT: case Constants.IF_ICMPLE:
-            return s(depth-1)+" "+getCondition(i)+" "+s(depth);
+            comp = s(depth-1)+" "+getCondition(i)+" "+s(depth);
+            break;
         default:
-            System.err.println("Invalid comparison instruction: "+i);
-            System.exit(-1);
-            return null;
-        }        
+            throw new IllegalArgumentException("Invalid comparison instruction: "+i);
+        }
+        return comp;
     }
 
+    /**
+     * Get the C type to be used for an array bytecode.
+     * @param The bytecode
+     * @return The C type
+     */
     private static String getArrayType(Instruction i) {
+        String type = null;
         switch(i.getOpcode()) {
-        case Constants.AALOAD: case Constants.AASTORE: return "_int___obj_t"; //return "_java_lang_Object___obj_t";
-        case Constants.IALOAD: case Constants.IASTORE: return "_int___obj_t";
-        case Constants.FALOAD: case Constants.FASTORE: return "_float___obj_t";
-        case Constants.CALOAD: case Constants.CASTORE: return "_char___obj_t";
-        case Constants.SALOAD: case Constants.SASTORE: return "_short___obj_t";
-        case Constants.BALOAD: case Constants.BASTORE: return "_byte___obj_t";
-        case Constants.LALOAD: case Constants.LASTORE: return "_long___obj_t";
-        case Constants.DALOAD: case Constants.DASTORE: return "_double___obj_t";
+        case Constants.AALOAD: case Constants.AASTORE:
+            // this should be "_java_lang_Object___obj_t"
+            type = "_int___obj_t";
+            break;
+        case Constants.IALOAD: case Constants.IASTORE:
+            type = "_int___obj_t";
+            break;
+        case Constants.FALOAD: case Constants.FASTORE:
+            type = "_float___obj_t";
+            break;
+        case Constants.CALOAD: case Constants.CASTORE:
+            type = "_char___obj_t";
+            break;
+        case Constants.SALOAD: case Constants.SASTORE:
+            type = "_short___obj_t";
+            break;
+        case Constants.BALOAD: case Constants.BASTORE:
+            type = "_byte___obj_t";
+            break;
+        case Constants.LALOAD: case Constants.LASTORE:
+            type = "_long___obj_t";
+            break;
+        case Constants.DALOAD: case Constants.DASTORE:
+            type = "_double___obj_t";
+            break;
         default:
-            System.err.println("Invalid array instruction: "+i);
-            System.exit(-1);
-            return null;
+            throw new IllegalArgumentException("Invalid array instruction: "+i);
         }
+        return type;
     }
 
-    private static PrintWriter getFile(String dir, String name) {
-        PrintWriter file = null;
-        try {
-            FileWriter f = new FileWriter(dir+File.separator+name);
-            BufferedWriter b = new BufferedWriter(f);
-            file = new PrintWriter(b);
-        } catch (IOException exc) {
-            System.err.println(exc);
-            System.exit(-1);
-        }
-        return file;
+    /**
+     * Create a writable file.
+     * @param dir The directory in which to create the file
+     * @param name The file name
+     * @return The created file
+     */
+    private static PrintWriter getFile(String dir, String name) throws IOException {
+        FileWriter f = new FileWriter(dir+File.separator+name);
+        BufferedWriter b = new BufferedWriter(f);
+        return new PrintWriter(b);
     }
 
-    public static void dumpAll(String outDir) {
+    /**
+     * Generate C code for the entire application.
+     * @param outDir The directory in which to create generated files
+     */
+    public static void dumpAll(String outDir) throws IOException {
         Map<String, Integer> stringPool = new LinkedHashMap<String, Integer>();
      
         PrintWriter defsOut = getFile(outDir, "defs.h");
@@ -545,11 +715,15 @@ public class ClassInfo {
         dumpEndDefs(defsOut);
         defsOut.flush();
 
-        for (ClassInfo c : classInfoMap.values()) {
-            PrintWriter out = getFile(outDir+File.separator+"classes", c.getCName()+".c");
-            out.println("#include \"jvm.h\"");
-            c.dumpBodies(out, stringPool);
-            out.flush();
+        try {
+            for (ClassInfo c : classInfoMap.values()) {
+                PrintWriter out = getFile(outDir+File.separator+"classes", c.getCName()+".c");
+                out.println("#include \"jvm.h\"");
+                c.dumpBodies(out, stringPool);
+                out.flush();
+            }
+        } catch (ClassNotFoundException exc) {
+            Logger.getGlobal().severe("Class that should have been loaded not found: "+exc);
         }
 
         PrintWriter mainOut = getFile(outDir, "main.c");
@@ -559,6 +733,11 @@ public class ClassInfo {
         mainOut.flush();
     }
 
+    /**
+     * Generate the list of arguments for a method.
+     * @param out The file to write to
+     * @param m The method the code is generated for
+     */
     public static void dumpArgList(PrintWriter out, Method m) {
         int argCount = getArgCount(m.getArgumentTypes(), m.isStatic());
         out.print("(");
@@ -568,6 +747,10 @@ public class ClassInfo {
         out.print("int32_t *restrict retexc)");
     }
 
+    /**
+     * Generate the start of the C declarations.
+     * @param out The file to write to
+     */
     public static void dumpStartDefs(PrintWriter out) {
         out.println("#ifndef _DEFS_H_");
         out.println("#define _DEFS_H_");
@@ -585,6 +768,10 @@ public class ClassInfo {
         dumpIfaceMethTabDef(out);
     }
 
+    /**
+     * Generate the C declaration of the interface method table.
+     * @param out The file to write to
+     */
     public static void dumpIfaceMethTabDef(PrintWriter out) {
         if (!interfaceList.isEmpty()) {
             out.println("typedef struct {");
@@ -602,6 +789,10 @@ public class ClassInfo {
         }
     }
 
+    /**
+     * Generate the C declarations for this class.
+     * @param out The file to write to
+     */
     public void dumpDefs(PrintWriter out, Set<ClassInfo> dumped) {
         ClassInfo superClass = getSuperClass();
         if (superClass != null && !dumped.contains(superClass)) {
@@ -618,6 +809,10 @@ public class ClassInfo {
         dumpObjectDef(out);
     }
 
+    /**
+     * Generate the C declaration for the class structure.
+     * @param out The file to write to
+     */
     public void dumpClassDef(PrintWriter out) {
         out.println("typedef struct {");
         out.println("\t/* header */");
@@ -638,19 +833,23 @@ public class ClassInfo {
         out.println("} "+getCClassTypeName()+";");
         out.println();
 
-        out.println("/* forward definition of class object */");
+        out.println("/* forward declaration of class object */");
         out.println("extern "+getCClassTypeName()+" "+getCName()+";");
         out.println();
     }
 
+    /**
+     * Generate the C declarations for the method pointers.
+     * @param out The file to write to
+     */
     public void dumpMethodPointerDefs(PrintWriter out) {
         out.println("\t/* method pointers */");
         for (Map.Entry<Method, ClassInfo> e : getInstanceMethods()) {
             Method m = e.getKey();
             String fqName = e.getValue().getName()+"."+m.getName()+m.getSignature();
             if (getVirtualMethods().contains(fqName)
-                && !(m.getName().equals("<init>")
-                     && m.getSignature().equals("()V"))) {
+                && !("<init>".equals(m.getName())
+                     && "()V".equals(m.getSignature()))) {
                 out.print("\t"+getCType(m.getReturnType())+
                           " (* const "+getCMethName(m)+")");
                 dumpArgList(out, m);
@@ -659,6 +858,10 @@ public class ClassInfo {
         }
     }
 
+    /**
+     * Generate the C declarations for the static fields.
+     * @param out The file to write to
+     */
     public void dumpStaticFieldDefs(PrintWriter out) {
         out.println("/* static fields */");
         for (Field f : Filter.statics(getFields())) {
@@ -676,6 +879,10 @@ public class ClassInfo {
         out.println();
     }
 
+    /**
+     * Generate the C declarations for the methods (prototypes).
+     * @param out The file to write to
+     */
     public void dumpMethodDefs(PrintWriter out) {
         out.println("/* method prototypes */");
         for (Method m : getMethods()) {
@@ -690,6 +897,10 @@ public class ClassInfo {
         out.println();
     }
 
+    /**
+     * Generate the C declaration for the object structure.
+     * @param out The file to write to
+     */
     public void dumpObjectDef(PrintWriter out) {
         out.println("typedef struct {");
         out.println("\t/* header */");
@@ -711,11 +922,19 @@ public class ClassInfo {
         out.println();
     }
 
+    /**
+     * Generate the end of the C declarations.
+     * @param out The file to write to
+     */
     public static void dumpEndDefs(PrintWriter out) {
         out.println("#endif /* _DEFS_H_ */");
     }
 
-    public void dumpBodies(PrintWriter out, Map<String, Integer> stringPool) {
+    /**
+     * Generate the C implementations for this class.
+     * @param out The file to write to
+     */
+    public void dumpBodies(PrintWriter out, Map<String, Integer> stringPool) throws ClassNotFoundException {
         dumpStaticFields(out, stringPool);
         dumpMethodBodies(out, stringPool);
 
@@ -726,6 +945,10 @@ public class ClassInfo {
         dumpClassBody(out, stringPool);
     }
 
+    /**
+     * Generate the C implementations of the methods.
+     * @param out The file to write to
+     */
     public void dumpMethodBodies(PrintWriter out, Map<String, Integer> stringPool) {
         for (Method m : getMethods()) {
             Code code = m.getCode();
@@ -748,13 +971,17 @@ public class ClassInfo {
         out.println();
     }
 
-    public void dumpIfaceMethTab(PrintWriter out) {
+    /**
+     * Generate the C definition of the interface method table for this class.
+     * @param out The file to write to
+     */
+    public void dumpIfaceMethTab(PrintWriter out) throws ClassNotFoundException {
         out.println("imtab_t "+getCName()+"_imtab = {");
         for (ClassInfo i : interfaceList) {
             out.println("\t/* interface "+i.getName()+" */");
             for (Method m : i.getMethods()) {
                 boolean found = false;
-                if (implementationOf(i)) {
+                if (clazz.implementationOf(i.clazz)) {
                     for (Map.Entry<Method, ClassInfo> e : getInstanceMethods()) {
                         if (methodsEqual(m, e.getKey())) {
                             out.println("\t"+e.getValue().getCName()+"_"+getCMethName(m)+", ");
@@ -771,7 +998,11 @@ public class ClassInfo {
         out.println("};");
     }
 
-    public void dumpClassBody(PrintWriter out, Map<String, Integer> stringPool) {
+    /**
+     * Generate the C definition of the class structure.
+     * @param out The file to write to
+     */
+    public void dumpClassBody(PrintWriter out, Map<String, Integer> stringPool) throws ClassNotFoundException {
         String classClassPtr = "&"+getClassInfo("java.lang.Class").getCName();
         ClassInfo superClass = getSuperClass();
         String superClassPtr = superClass != null ? "&"+superClass.getCName() : "0";
@@ -780,7 +1011,7 @@ public class ClassInfo {
             String typeName = getName().substring(0, getName().length()-2);
             ClassInfo ci = getClassInfo(typeName);
             if (ci == null) {
-                System.err.println("Class not found: "+typeName+" in "+getName());
+                Logger.getGlobal().severe("Class not found: "+typeName+" in "+getName());
             } else {
                 elemType = "&"+ci.getCName();
             }
@@ -804,7 +1035,7 @@ public class ClassInfo {
             int buffer = 0;
             int bufferCount = 0;
             for (ClassInfo i : interfaceList) {
-                buffer |= (instanceOf(i) ? 1 : 0) << bufferCount;
+                buffer |= (clazz.instanceOf(i.clazz) ? 1 : 0) << bufferCount;
                 bufferCount++;
                 if (bufferCount == 32) {
                     out.print(String.format("0x%08x", buffer)+", ");
@@ -831,14 +1062,18 @@ public class ClassInfo {
         out.println();
     }
 
+    /**
+     * Generate the C definitions of the method pointers.
+     * @param out The file to write to
+     */
     public void dumpMethodPointers(PrintWriter out) {
         out.println("\t/* method pointers */");
         for (Map.Entry<Method, ClassInfo> e : getInstanceMethods()) {
             Method m = e.getKey();
             String fqName = e.getValue().getName()+"."+m.getName()+m.getSignature();
             if (getVirtualMethods().contains(fqName)
-                && !(m.getName().equals("<init>")
-                     && m.getSignature().equals("()V"))) {
+                && !("<init>".equals(m.getName())
+                     && "()V".equals(m.getSignature()))) {
                 String className = e.getValue().getCName();
                 String methName = getCMethName(m);
                 if (m.getCode() != null || m.isNative()) {
@@ -850,6 +1085,10 @@ public class ClassInfo {
         }
     }
 
+    /**
+     * Generate the C definitions of the static fields.
+     * @param out The file to write to
+     */
     public void dumpStaticFields(PrintWriter out, Map<String, Integer> stringPool) {
         out.println("/* static fields */");
         for (Field f : Filter.statics(getFields())) {
@@ -896,8 +1135,7 @@ public class ClassInfo {
                     out.println("(int32_t)&stringPool["+stringPool.get(strVal)+"];");
                     break;
                 default:
-                    System.err.println("Invalid tag for ConstantValue: "+cv.getTag());
-                    System.exit(-1);
+                    throw new IllegalArgumentException("Invalid tag for ConstantValue: "+cv.getTag());
                 }
             } else {
                 out.println("0;");
@@ -906,13 +1144,29 @@ public class ClassInfo {
         out.println();
     }
 
+    /**
+     * Create the name for a variable that represents a stack slot.
+     * @param depth The depth of the stack slot
+     */
     private static String s(int depth) {
         return "s_"+depth;
     }
-    private static String v(int depth) {
-        return "v_"+depth;
+
+    /**
+     * Create the name for a variable that represents a local variable.
+     * @param depth The index of the local variable
+     */
+    private static String v(int index) {
+        return "v_"+index;
     }
 
+    /**
+     * Generate the C code for a method.
+     * @param out The file to write to
+     * @param stringPool The string pool
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     */
     public void dumpCode(PrintWriter out, Map<String, Integer> stringPool, Method method, Code code) {
         InstructionList il = new InstructionList(code.getCode());
 
@@ -933,7 +1187,7 @@ public class ClassInfo {
         StackDepths depthMap = new StackDepths(il, constPool);
         StackReferences refMap = new StackReferences(il, constPool);
 
-        dumpSyncEnter(out, method, code, 0);
+        dumpSyncEnter(out, method);
 
         for (InstructionHandle ih : il.getInstructionHandles()) {
             Instruction i = ih.getInstruction();
@@ -949,91 +1203,94 @@ public class ClassInfo {
         }
     }
 
+    /**
+     * Generate the C code for a bytecode.
+     * @param out The file to write to
+     * @param stringPool The string pool
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     * @param i The bytecode
+     * @param depth The current stack depth
+     * @param refs The current stack state (references/primitive values)
+     */
     public void dumpInstruction(PrintWriter out, Map<String, Integer> stringPool, Method method, Code code, int pos, Instruction i, int depth, Deque<Boolean> refs) {
 
+        // variables shared by different branches of the switch
+        ConstantPushInstruction cpi;
+        LoadInstruction li;
+        StoreInstruction si;
+
         switch (i.getOpcode()) {
+
         case Constants.ACONST_NULL:
             out.print("\t"+s(depth+1)+" = 0;");                
             break;
 
         case Constants.ICONST_M1: case Constants.ICONST_0: case Constants.ICONST_1:
         case Constants.ICONST_2: case Constants.ICONST_3: case Constants.ICONST_4:
-        case Constants.ICONST_5: case Constants.BIPUSH: case Constants.SIPUSH: {
-            ConstantPushInstruction cpi = (ConstantPushInstruction)i;
+        case Constants.ICONST_5: case Constants.BIPUSH: case Constants.SIPUSH:
+            cpi = (ConstantPushInstruction)i;
             out.print("\t"+s(depth+1)+" = "+cpi.getValue().intValue()+";");
             break;
-        }
-        case Constants.FCONST_0: case Constants.FCONST_1: case Constants.FCONST_2: {
-            ConstantPushInstruction cpi = (ConstantPushInstruction)i;
+        case Constants.FCONST_0: case Constants.FCONST_1: case Constants.FCONST_2:
+            cpi = (ConstantPushInstruction)i;
             out.print("\t"+s(depth+1)+" = "+Float.floatToIntBits(cpi.getValue().floatValue())+";");
             break;
-        }
-        case Constants.LCONST_0: case Constants.LCONST_1: {
-            ConstantPushInstruction cpi = (ConstantPushInstruction)i;
+        case Constants.LCONST_0: case Constants.LCONST_1:
+            cpi = (ConstantPushInstruction)i;
             out.print("\t"+s(depth+1)+" = "+(int)cpi.getValue().longValue()+";"+
                       " "+s(depth+2)+" = "+(int)(cpi.getValue().longValue() >> 32)+";");
             break;
-        }
-        case Constants.DCONST_0: case Constants.DCONST_1: {
-            ConstantPushInstruction cpi = (ConstantPushInstruction)i;
+        case Constants.DCONST_0: case Constants.DCONST_1:
+            cpi = (ConstantPushInstruction)i;
             out.print("\t"+s(depth+1)+" = "+(int)Double.doubleToLongBits(cpi.getValue().doubleValue())+";"+
                       " "+s(depth+2)+" = "+(int)(Double.doubleToLongBits(cpi.getValue().doubleValue()) >> 32)+";");
             break;
-        }
 
-        case Constants.LDC: case Constants.LDC_W: {
-            LDC ldc = (LDC)i;
-            dumpLdc(out, stringPool, ldc.getValue(constPool), depth);
+        case Constants.LDC: case Constants.LDC_W:
+            dumpLdc(out, stringPool, ((LDC)i).getValue(constPool), depth);
             break;
-        }
 
-        case Constants.LDC2_W: {
-            LDC2_W ldc = (LDC2_W)i;
-            dumpLdc2(out, ldc.getValue(constPool), depth);
+        case Constants.LDC2_W:
+            dumpLdc2(out, ((LDC2_W)i).getValue(constPool), depth);
             break;
-        }
 
         case Constants.ALOAD_0: case Constants.ALOAD_1: case Constants.ALOAD_2:
         case Constants.ALOAD_3: case Constants.ALOAD:
         case Constants.ILOAD_0: case Constants.ILOAD_1: case Constants.ILOAD_2:
         case Constants.ILOAD_3: case Constants.ILOAD:
         case Constants.FLOAD_0: case Constants.FLOAD_1: case Constants.FLOAD_2:
-        case Constants.FLOAD_3: case Constants.FLOAD: {
-            LoadInstruction li = (LoadInstruction)i;
+        case Constants.FLOAD_3: case Constants.FLOAD:
+            li = (LoadInstruction)i;
             out.print("\t"+s(depth+1)+" = "+v(li.getIndex())+";");
             break;
-        }
-
         case Constants.LLOAD_0: case Constants.LLOAD_1: case Constants.LLOAD_2:
         case Constants.LLOAD_3: case Constants.LLOAD:
         case Constants.DLOAD_0: case Constants.DLOAD_1: case Constants.DLOAD_2:
-        case Constants.DLOAD_3: case Constants.DLOAD: {
-            LoadInstruction li = (LoadInstruction)i;
+        case Constants.DLOAD_3: case Constants.DLOAD:
+            li = (LoadInstruction)i;
             out.print("\t"+s(depth+1)+" = "+v(li.getIndex())+";"+
                       " "+s(depth+2)+" = "+v(li.getIndex()+1)+";");
             break;
-        }
 
         case Constants.ASTORE_0: case Constants.ASTORE_1: case Constants.ASTORE_2:
         case Constants.ASTORE_3: case Constants.ASTORE:
         case Constants.ISTORE_0: case Constants.ISTORE_1: case Constants.ISTORE_2:
         case Constants.ISTORE_3: case Constants.ISTORE:
         case Constants.FSTORE_0: case Constants.FSTORE_1: case Constants.FSTORE_2:
-        case Constants.FSTORE_3: case Constants.FSTORE: {
-            StoreInstruction si = (StoreInstruction)i;
+        case Constants.FSTORE_3: case Constants.FSTORE:
+            si = (StoreInstruction)i;
             out.print("\t"+v(si.getIndex())+" = "+s(depth)+";");
             break;
-        }
-
         case Constants.LSTORE_0: case Constants.LSTORE_1: case Constants.LSTORE_2:
         case Constants.LSTORE_3: case Constants.LSTORE:
         case Constants.DSTORE_0: case Constants.DSTORE_1: case Constants.DSTORE_2:
-        case Constants.DSTORE_3: case Constants.DSTORE: {
-            StoreInstruction si = (StoreInstruction)i;
+        case Constants.DSTORE_3: case Constants.DSTORE:
+            si = (StoreInstruction)i;
             out.print("\t"+v(si.getIndex())+" = "+s(depth-1)+";"+
                       " "+v(si.getIndex()+1)+" = "+s(depth)+";");
             break;
-        }
 
         case Constants.DUP:
             out.print("\t"+s(depth+1)+" = "+s(depth)+";");
@@ -1080,11 +1337,10 @@ public class ClassInfo {
                       " "+s(depth-1)+" = a; }");
             break;
 
-        case Constants.IINC: {
+        case Constants.IINC:
             IINC ii = (IINC)i;
             out.print("\t"+v(ii.getIndex())+" += "+ii.getIncrement()+";");
             break;
-        }
 
         case Constants.IADD: case Constants.ISUB: case Constants.IMUL:
         case Constants.IOR: case Constants.IAND: case Constants.IXOR:
@@ -1291,29 +1547,21 @@ public class ClassInfo {
                       " else { "+s(depth-3)+" = *c > *d ? 1 : (*c == *d ? 0 : -1); } }");
             break;
 
-        case Constants.GETFIELD: {
-            GETFIELD gf = (GETFIELD)i;
-            dumpGetField(out, method, code, pos, gf, depth);
+        case Constants.GETFIELD:
+            dumpGetField(out, method, code, pos, (GETFIELD)i, depth);
             break;
-        }
 
-        case Constants.PUTFIELD: {
-            PUTFIELD pf = (PUTFIELD)i;
-            dumpPutField(out, method, code, pos, pf, depth);
+        case Constants.PUTFIELD:
+            dumpPutField(out, method, code, pos, (PUTFIELD)i, depth);
             break;
-        }
 
-        case Constants.GETSTATIC: {
-            GETSTATIC gs = (GETSTATIC)i;
-            dumpGetStatic(out, method, code, pos, gs, depth);
+        case Constants.GETSTATIC:
+            dumpGetStatic(out, (GETSTATIC)i, depth);
             break;
-        }
 
-        case Constants.PUTSTATIC: {
-            PUTSTATIC ps = (PUTSTATIC)i;
-            dumpPutStatic(out, method, code, pos, ps, depth);
+        case Constants.PUTSTATIC:
+            dumpPutStatic(out, (PUTSTATIC)i, depth);
             break;
-        }
 
         case Constants.AALOAD: case Constants.IALOAD: case Constants.FALOAD:
         case Constants.CALOAD: case Constants.SALOAD: case Constants.BALOAD:
@@ -1361,16 +1609,12 @@ public class ClassInfo {
             out.print("\t"+s(depth)+" = jvm_arrlength(_int___obj_t, "+s(depth)+");");
             break;
 
-        case Constants.INSTANCEOF: {
-            INSTANCEOF io = (INSTANCEOF)i;
-            dumpInstanceOf(out, io, depth);
+        case Constants.INSTANCEOF:
+            dumpInstanceOf(out, (INSTANCEOF)i, depth);
             break;
-        }
-        case Constants.CHECKCAST: {
-            CHECKCAST cc = (CHECKCAST)i;
-            dumpCheckCast(out, method, code, pos, cc, depth);
+        case Constants.CHECKCAST:
+            dumpCheckCast(out, method, code, pos, (CHECKCAST)i, depth);
             break;
-        }
 
         case Constants.IFNONNULL: case Constants.IFNE:
         case Constants.IF_ACMPNE: case Constants.IF_ICMPNE:
@@ -1379,89 +1623,57 @@ public class ClassInfo {
         case Constants.IFGE: case Constants.IF_ICMPGE:
         case Constants.IFLT: case Constants.IF_ICMPLT:
         case Constants.IFGT: case Constants.IF_ICMPGT:
-        case Constants.IFLE: case Constants.IF_ICMPLE: {
+        case Constants.IFLE: case Constants.IF_ICMPLE:
             BranchInstruction bi = (BranchInstruction)i;
             out.print("\tif ("+getComparison(i, depth)+") "+
                       "goto L"+(pos + bi.getIndex())+";");
             break;
-        }
 
         case Constants.GOTO:
-        case Constants.GOTO_W: {
+        case Constants.GOTO_W:
             GotoInstruction gi = (GotoInstruction)i;
             out.print("\tgoto L"+(pos + gi.getIndex())+";");
             break;
-        }
 
-        case Constants.TABLESWITCH: case Constants.LOOKUPSWITCH: {
-            Select sel = (Select)i;
-            dumpSwitch(out, pos, sel, depth);
+        case Constants.TABLESWITCH: case Constants.LOOKUPSWITCH:
+            dumpSwitch(out, pos, (Select)i, depth);
             break;
-        }
 
         case Constants.RETURN:
-            dumpSyncReturn(out, method, code, pos);
+            dumpSyncReturn(out, method);
             out.print("\treturn;");
             break;
         case Constants.ARETURN: case Constants.IRETURN: case Constants.FRETURN:
             out.println("\t{ int32_t a = "+s(depth)+";");
-            dumpSyncReturn(out, method, code, pos);
+            dumpSyncReturn(out, method);
             out.print("\treturn "+s(depth)+"; }");
             break;
         case Constants.LRETURN: case Constants.DRETURN:
             out.println("\t{ int64_t a = ((int64_t)"+s(depth)+" << 32) | (uint32_t)"+s(depth-1)+";");
-            dumpSyncReturn(out, method, code, pos);
+            dumpSyncReturn(out, method);
             out.print("\treturn a; }");
             break;
 
-        case Constants.NEW: {
+        case Constants.NEW:
             NEW n = (NEW)i;
-            dumpNew(out, method, code, pos, n.getType(constPool), s(depth+1));
-            break;                
-        }
-        case Constants.ANEWARRAY: case Constants.NEWARRAY: {
-            Type type;
-            if (i.getOpcode() == Constants.NEWARRAY) {
-                type = ((NEWARRAY)i).getType();
-            } else {
-                ANEWARRAY an = (ANEWARRAY)i;
-                type = Type.getType("["+an.getType(constPool).getSignature());
-            }
-            out.println("\t{ int32_t z_0 = "+s(depth)+";");
-            dumpNewArray(out, method, code, pos, type, "z_0", s(depth));
-            out.print(" }");
-            break;                
-        }
-        case Constants.MULTIANEWARRAY: {
-            MULTIANEWARRAY mn = (MULTIANEWARRAY)i;
-            int dim = mn.getDimensions();
-            String sig = mn.getType(constPool).getSignature();
-            out.println("\t{ int32_t z_0 = "+s(depth-dim+1)+";");
-            dumpNewArray(out, method, code, pos, Type.getType(sig), "z_0", s(depth-dim+1));
-            for (int k = 1; k < dim; k++) {
-                out.println();
-                sig = sig.substring(1);
-                out.println("\tint32_t z_"+k+" = "+s(depth-dim+k+1)+";"+
-                            " int32_t k_"+k+";"+
-                            " for (k_"+k+" = 0; k_"+k+" < z_"+(k-1)+"; k_"+k+"++) {");
-                dumpNewArray(out, method, code, pos, Type.getType(sig), "z_"+k, s(depth-dim+k+1));
-                out.print(" jvm_arrstore_ref(_int___obj_t, "+s(depth-dim+k)+", k_"+k+", "+s(depth-dim+k+1)+");");
-            }
-            for (int k = 0; k < dim; k++) {
-                out.print(" }");
-            }
+            dumpNew(out, method, code, pos, n.getType(constPool), depth);
             break;
-        }
+
+        case Constants.ANEWARRAY: case Constants.NEWARRAY:
+            dumpNewArray(out, method, code, pos, i, depth);
+            break;                
+
+        case Constants.MULTIANEWARRAY:
+            MULTIANEWARRAY mn = (MULTIANEWARRAY)i;
+            dumpMultiANewArray(out, method, code, pos, mn, depth);
+            break;
 
         case Constants.INVOKESTATIC: case Constants.INVOKEVIRTUAL:
-        case Constants.INVOKESPECIAL: case Constants.INVOKEINTERFACE: {
-            InvokeInstruction ii = (InvokeInstruction)i;
-            dumpInvoke(out, method, code, pos, ii, depth);
+        case Constants.INVOKESPECIAL: case Constants.INVOKEINTERFACE:
+            dumpInvoke(out, method, code, pos, (InvokeInstruction)i, depth);
             break;
-        }
 
-        case Constants.ATHROW: {
-            ATHROW at = (ATHROW)i;
+        case Constants.ATHROW:
             if (depth != 0) {
                 out.print("\t"+s(0)+" = "+s(depth)+";");
             } else {
@@ -1469,18 +1681,16 @@ public class ClassInfo {
             }
             dumpThrow(out, method, code, pos);
             break;
-        }
 
-        case Constants.MONITORENTER: {
+        case Constants.MONITORENTER:
             dumpNPE(out, method, code, pos, depth);
-            dumpMonitorEnter(out, method, code, pos, depth);
+            dumpMonitorEnter(out, depth);
             break;
-        }
-        case Constants.MONITOREXIT: {
+
+        case Constants.MONITOREXIT:
             dumpNPE(out, method, code, pos, depth);
-            dumpMonitorExit(out, method, code, pos, depth);
+            dumpMonitorExit(out, depth);
             break;
-        }
 
         default:
             out.print("\tfprintf(stderr, \""+i.getName()+" not implemented\\n\");");
@@ -1489,12 +1699,25 @@ public class ClassInfo {
         out.println("\t/* "+i.getName()+" */");
     }
 
+    /**
+     * Generate a message that some item could not be found.
+     * @param out The file to write to
+     * @param type The type of item that could not be found
+     * @param item The name of the item that could not be found
+     */
     public void dumpNotFound(PrintWriter out, String type, String item) {
         String msg = type+" not found: "+item+" in "+getName();
-        System.err.println(msg);
+        Logger.getGlobal().severe(msg);
         out.print("\tfprintf(stderr, \""+msg+"\\n\");");
     }
 
+    /**
+     * Generate the C code for the LDC bytecode
+     * @param out The file to write to
+     * @param stringPool The string pool
+     * @param value The constant to be loaded
+     * @param depth The current stack depth
+     */
     public void dumpLdc(PrintWriter out, Map<String, Integer> stringPool, Object value, int depth) {
         if (value instanceof String) { 
             String strVal = (String)value;
@@ -1518,6 +1741,12 @@ public class ClassInfo {
         }
     }
 
+    /**
+     * Generate the C code for the LDC2 bytecode
+     * @param out The file to write to
+     * @param value The constant to be loaded
+     * @param depth The current stack depth
+     */
     public void dumpLdc2(PrintWriter out, Object value, int depth) {
         if (value instanceof Double) {
             Double doubleVal = (Double)value;
@@ -1530,6 +1759,15 @@ public class ClassInfo {
         }
     }
 
+    /**
+     * Generate the C code for the GETFIELD bytecode.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     * @param gf The bytecode
+     * @param depth The current stack depth
+     */
     public void dumpGetField(PrintWriter out, Method method, Code code, int pos, GETFIELD gf, int depth) {
         String className = gf.getReferenceType(constPool).toString();
         ClassInfo ci = getClassInfo(className);
@@ -1555,6 +1793,15 @@ public class ClassInfo {
         }
     }
 
+    /**
+     * Generate the C code for the PUTFIELD bytecode.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     * @param pf The bytecode
+     * @param depth The current stack depth
+     */
     public void dumpPutField(PrintWriter out, Method method, Code code, int pos, PUTFIELD pf, int depth) {
         String className = pf.getReferenceType(constPool).toString();
         ClassInfo ci = getClassInfo(className);
@@ -1579,7 +1826,13 @@ public class ClassInfo {
         }
     }
 
-    public void dumpGetStatic(PrintWriter out, Method method, Code code, int pos, GETSTATIC gs, int depth) {
+    /**
+     * Generate the C code for the GETSTATIC bytecode.
+     * @param out The file to write to
+     * @param gs The bytecode
+     * @param depth The current stack depth
+     */
+    public void dumpGetStatic(PrintWriter out, GETSTATIC gs, int depth) {
         String className = gs.getReferenceType(constPool).toString();
         ClassInfo ci = getClassInfo(className);
         String fieldName = gs.getFieldName(constPool);
@@ -1603,7 +1856,13 @@ public class ClassInfo {
         }
     }
 
-    public void dumpPutStatic(PrintWriter out, Method method, Code code, int pos, PUTSTATIC ps, int depth) {
+    /**
+     * Generate the C code for the PUTSTATIC bytecode.
+     * @param out The file to write to
+     * @param ps The bytecode
+     * @param depth The current stack depth
+     */
+    public void dumpPutStatic(PrintWriter out, PUTSTATIC ps, int depth) {
         String className = ps.getReferenceType(constPool).toString();
         ClassInfo ci = getClassInfo(className);
         String fieldName = ps.getFieldName(constPool);
@@ -1625,6 +1884,12 @@ public class ClassInfo {
         }
     }
 
+    /**
+     * Generate the C code for the INSTANCEOF bytecode.
+     * @param out The file to write to
+     * @param io The bytecode
+     * @param depth The current stack depth
+     */
     public void dumpInstanceOf(PrintWriter out, INSTANCEOF io, int depth) {
         String className = io.getType(constPool).toString();
         ClassInfo ci = getClassInfo(className);
@@ -1641,6 +1906,15 @@ public class ClassInfo {
         }
     }
 
+    /**
+     * Generate the C code for the CHECKCAST bytecode.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     * @param cc The bytecode
+     * @param depth The current stack depth
+     */
     public void dumpCheckCast(PrintWriter out, Method method, Code code, int pos, CHECKCAST cc, int depth) {
         String className = cc.getType(constPool).toString();
         ClassInfo ci = getClassInfo(className);
@@ -1661,6 +1935,13 @@ public class ClassInfo {
         out.print(" }");
     }
 
+    /**
+     * Generate the C code for a switch bytecode.
+     * @param out The file to write to
+     * @param pos The current position in the code
+     * @param sel The bytecode
+     * @param depth The current stack depth
+     */
     public void dumpSwitch(PrintWriter out, int pos, Select sel, int depth) {
         int [] matchs = sel.getMatchs();
         int [] indices = sel.getIndices();
@@ -1671,25 +1952,102 @@ public class ClassInfo {
         out.print("\tdefault: goto L"+(pos+sel.getIndex())+"; }");
     }
 
-    public void dumpNew(PrintWriter out, Method method, Code code, int pos, Type type, String dstVal) {
+    /**
+     * Generate the C code for the NEW bytecode.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     * @param type The type to be allocated
+     * @param depth The current stack depth
+     */
+    public void dumpNew(PrintWriter out, Method method, Code code, int pos, Type type, int depth) {
         ClassInfo ci = getClassInfo(type.toString());
         if (ci == null) {
             dumpNotFound(out, "Class", type.toString());
             return;
         }
-        out.println("\t"+dstVal+" = (int32_t)jvm_alloc(&"+ci.getCName()+", sizeof("+ci.getCObjTypeName()+"), &exc);");
+        out.println("\t"+s(depth+1)+" = (int32_t)jvm_alloc(&"+ci.getCName()+", sizeof("+ci.getCObjTypeName()+"), &exc);");
         out.print("\tif (unlikely(exc != 0)) { "+s(0)+" = exc; exc = 0;");
         dumpThrow(out, method, code, pos);
         out.print(" }");
     }
 
-    public void dumpNewArray(PrintWriter out, Method method, Code code, int pos, Type type, String sizeVal, String dstVal) {
+    /**
+     * Generate the C code for the NEWARRAY/ANEWARRAY bytecodes.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     * @param i The bytecode
+     * @param depth The current stack depth
+     */
+    public void dumpNewArray(PrintWriter out, Method method, Code code, int pos, Instruction i, int depth) {
+        Type type;
+        if (i.getOpcode() == Constants.NEWARRAY) {
+            type = ((NEWARRAY)i).getType();
+        } else {
+            ANEWARRAY an = (ANEWARRAY)i;
+            type = Type.getType("["+an.getType(constPool).getSignature());
+        }
+        out.println("\t{ int32_t z_0 = "+s(depth)+";");
+        dumpNewArrayRaw(out, method, code, pos, type, "z_0", s(depth));
+        out.print(" }");
+    }
+
+    /**
+     * Generate the C code for the MULTIANEWARRAY bytecode.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     * @param mn The bytecode
+     * @param depth The current stack depth
+     */
+    public void dumpMultiANewArray(PrintWriter out, Method method, Code code, int pos, MULTIANEWARRAY mn, int depth) {
+        int dim = mn.getDimensions();
+        String sig = mn.getType(constPool).getSignature();
+        out.println("\t{ int32_t z_0 = "+s(depth-dim+1)+";");
+        dumpNewArrayRaw(out, method, code, pos, Type.getType(sig), "z_0", s(depth-dim+1));
+        for (int k = 1; k < dim; k++) {
+            out.println();
+            sig = sig.substring(1);
+            out.println("\tint32_t z_"+k+" = "+s(depth-dim+k+1)+";"+
+                        " int32_t k_"+k+";"+
+                        " for (k_"+k+" = 0; k_"+k+" < z_"+(k-1)+"; k_"+k+"++) {");
+            dumpNewArrayRaw(out, method, code, pos, Type.getType(sig), "z_"+k, s(depth-dim+k+1));
+            out.print(" jvm_arrstore_ref(_int___obj_t, "+s(depth-dim+k)+", k_"+k+", "+s(depth-dim+k+1)+");");
+        }
+        for (int k = 0; k < dim; k++) {
+            out.print(" }");
+        }
+    }
+
+    /**
+     * Generate the C code for a raw array allocation.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     * @param type The type of array to be allocated
+     * @param sizeVal The variable that holds the size
+     * @param dstVal The variable to receive the reference to the allocated array
+     */
+    public void dumpNewArrayRaw(PrintWriter out, Method method, Code code, int pos, Type type, String sizeVal, String dstVal) {
+
         int size;
         switch (type.getSignature()) {
-        case "[Z": case "[B": size = 1; break;
-        case "[C": case "[S": size = 2; break;
-        case "[J": case "[D": size = 8; break;
-        default: size = 4;
+        case "[Z": case "[B":
+            size = 1;
+            break;
+        case "[C": case "[S":
+            size = 2;
+            break;
+        case "[J": case "[D":
+            size = 8;
+            break;
+        default:
+            size = 4;
         }
 
         ClassInfo ci = getClassInfo(type.toString());
@@ -1706,34 +2064,40 @@ public class ClassInfo {
         out.print("\tjvm_setarrlength("+objType+", "+dstVal+", "+sizeVal+");");
     }
 
+    /**
+     * Generate the C code for a method invocation.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     * @param ii The bytecode
+     * @param depth The current stack depth
+     */
     public void dumpInvoke(PrintWriter out, Method method, Code code, int pos, InvokeInstruction ii, int depth) {
         int opcode = ii.getOpcode();
 
-        String name = ii.getMethodName(constPool);
+        String methName = ii.getMethodName(constPool);
         String signature = ii.getSignature(constPool);
-        String methName = escapeName(name+signature);        
+        String escName = escapeName(methName+signature);        
 
         String className = ii.getReferenceType(constPool).toString();
         ClassInfo ci = getClassInfo(className);
-        String fqName = ci.getName()+"."+name+signature;
+        String fqName = ci.getName()+"."+methName+signature;
         String typeName;
-        if (opcode == Constants.INVOKESTATIC
-            || opcode == Constants.INVOKESPECIAL
-            || opcode == Constants.INVOKEINTERFACE
-            || (opcode == Constants.INVOKEVIRTUAL
-                && !getVirtualMethods().contains(fqName))) {
-            ci = findMethodDeclarator(ci, name, signature);
+        if (opcode == Constants.INVOKEVIRTUAL
+            && getVirtualMethods().contains(fqName)) {
             if (ci == null) {
-                dumpNotFound(out, "Method", className+"."+name+signature);
-                return;
-            }
-            typeName = ci.getCName();
-        } else {
-            if (ci == null) {
-                dumpNotFound(out, "Method", className+"."+name+signature);
+                dumpNotFound(out, "Method", className+"."+methName+signature);
                 return;
             }
             typeName = ci.getCObjTypeName();
+        } else {
+            ci = findMethodDeclarator(ci, methName, signature);
+            if (ci == null) {
+                dumpNotFound(out, "Method", className+"."+methName+signature);
+                return;
+            }
+            typeName = ci.getCName();
         }
         
         Type retType = ii.getReturnType(constPool);
@@ -1748,22 +2112,20 @@ public class ClassInfo {
         }
         
         out.print("\t");
-        if (retSize > 0) {
-            if (retSize == 2) {
-                out.print("{ int64_t a = ");
-            } else {
-                out.print(s(depth-argCount+1)+" = ");
-            }
+        if (retSize == 2) {
+            out.print("{ int64_t a = ");
+        } else if (retSize > 0) {
+            out.print(s(depth-argCount+1)+" = ");
         }
         if (opcode == Constants.INVOKESTATIC
             || opcode == Constants.INVOKESPECIAL
             || (opcode == Constants.INVOKEVIRTUAL
                 && !getVirtualMethods().contains(fqName))) {
-            out.print(typeName+"_"+methName+"(");
+            out.print(typeName+"_"+escName+"(");
         } else if (opcode == Constants.INVOKEINTERFACE) {
-            out.print("(("+ci.getCObjTypeName()+"*)"+s(depth-argCount+1)+")->type->imtab->"+typeName+"_"+methName+"("); 
+            out.print("(("+ci.getCObjTypeName()+"*)"+s(depth-argCount+1)+")->type->imtab->"+typeName+"_"+escName+"("); 
         } else {
-            out.print("(("+typeName+"*)"+s(depth-argCount+1)+")->type->"+methName+"(");
+            out.print("(("+typeName+"*)"+s(depth-argCount+1)+")->type->"+escName+"(");
         }
         for (int k = argCount-1; k >= 0; --k) {
             out.print(s(depth-k)+", ");
@@ -1780,12 +2142,30 @@ public class ClassInfo {
         out.print(" }");
     }
 
+    /**
+     * Generate the C code for a null pointer check.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     * @param depth The current stack depth
+     */
     public void dumpNPE(PrintWriter out, Method method, Code code, int pos, int depth) {
         out.print("\tif (unlikely("+s(depth)+" == 0)) { "+s(0)+" = (int32_t)&npExc;");
         dumpThrow(out, method, code, pos);
         out.println(" }");
     }
 
+    /**
+     * Generate the C code for an array bounds check.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     * @param depth The current stack depth
+     * @param idxdepth The stack slot of the array index
+     * @param type The type of the array
+     */
     public void dumpABE(PrintWriter out, Method method, Code code, int pos, int depth, int idxdepth, String type) {
         out.print("\tif (unlikely("+s(idxdepth)+" < 0 ||"+
                   " "+s(idxdepth)+" >= jvm_arrlength("+type+", "+s(depth)+")))"+
@@ -1794,6 +2174,13 @@ public class ClassInfo {
         out.println(" }");
     }
 
+    /**
+     * Generate the C code to throw an exception
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     * @param code The code of the method
+     * @param pos The current position in the code
+     */
     public void dumpThrow(PrintWriter out, Method method, Code code, int pos) {
         CodeException [] excTab = code.getExceptionTable();
 
@@ -1818,11 +2205,11 @@ public class ClassInfo {
                         ClassInfo objci = getClassInfo("java.lang.Object");
                         if (ci == null) {
                             dumpNotFound(out, "Class", className);
-                            continue;
+                        } else {
+                            out.println();
+                            out.print("\tif (jvm_instanceof((("+objci.getCObjTypeName()+"*)"+s(0)+")->type, ("+objci.getCClassTypeName()+"*)&"+ci.getCName()+"))"+
+                                      " goto L"+handler+";");
                         }
-                        out.println();
-                        out.print("\tif (jvm_instanceof((("+objci.getCObjTypeName()+"*)"+s(0)+")->type, ("+objci.getCClassTypeName()+"*)&"+ci.getCName()+"))"+
-                                  " goto L"+handler+";");
                     }
                 }
             }
@@ -1831,44 +2218,70 @@ public class ClassInfo {
             Type retType = method.getReturnType();
             out.println();
             out.println("\t*retexc = "+s(0)+";");
-            dumpSyncReturn(out, method, code, pos);
+            dumpSyncReturn(out, method);
             out.print("\treturn"+(retType != Type.VOID ? " 0" : "")+";");
         }
     }
 
-    public void dumpMonitorEnter(PrintWriter out, Method method, Code code, int pos, int depth) {
+    /**
+     * Generate the C code for the MONITORENTER bytecode
+     * @param out The file to write to
+     * @param depth The current stack depth
+     */
+    public void dumpMonitorEnter(PrintWriter out, int depth) {
         ClassInfo ci = getClassInfo("java.lang.Object");
         out.print("\t{ int r = jvm_lock(("+ci.getCObjTypeName()+" *)"+s(depth)+");");
         out.println(" if (unlikely(r)) jvm_catch((int32_t)&vmErr); }");
     }
 
-    public void dumpMonitorExit(PrintWriter out, Method method, Code code, int pos, int depth) {
+    /**
+     * Generate the C code for the MONITOREXIT bytecode
+     * @param out The file to write to
+     * @param depth The current stack depth
+     */
+    public void dumpMonitorExit(PrintWriter out, int depth) {
         ClassInfo ci = getClassInfo("java.lang.Object");
         out.print("\t{ int r = jvm_unlock(("+ci.getCObjTypeName()+" *)"+s(depth)+");");
         out.println(" if (unlikely(r)) jvm_catch((int32_t)&vmErr); }");
     }
 
-    public void dumpSyncEnter(PrintWriter out, Method method, Code code, int pos) {
+    /**
+     * Generate the C code to acquiring a lock upon entering a method.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     */
+    public void dumpSyncEnter(PrintWriter out, Method method) {
         if (method.isSynchronized()) {
             if (method.isStatic()) {
                 out.println("\t"+s(0)+" = (int32_t)&"+getCName()+";");
             } else {
                 out.println("\t"+s(0)+" = "+v(0)+";");
             }
-            dumpMonitorEnter(out, method, code, pos, 0);
+            dumpMonitorEnter(out, 0);
         }
     }
-    public void dumpSyncReturn(PrintWriter out, Method method, Code code, int pos) {
+
+    /**
+     * Generate the C code to release a lock before returning.
+     * @param out The file to write to
+     * @param method The method the code is generated for
+     */
+    public void dumpSyncReturn(PrintWriter out, Method method) {
         if (method.isSynchronized()) {            
             if (method.isStatic()) {
                 out.println("\t"+s(0)+" = (int32_t)&"+getCName()+";");
             } else {
                 out.println("\t"+s(0)+" = "+v(0)+";");
             }
-            dumpMonitorExit(out, method, code, pos, 0);
+            dumpMonitorExit(out, 0);
         }
     }
 
+    /**
+     * Generate the C code for the string pool.
+     * @param out The file to write to
+     * @param stringPool The string pool
+     */
     public static void dumpStringPool(PrintWriter out, Map<String, Integer> stringPool) {
         ClassInfo arrci = getClassInfo("char[]");
         for (Map.Entry<String, Integer> e : stringPool.entrySet()) {
@@ -1914,6 +2327,10 @@ public class ClassInfo {
         out.println("};");
     }
 
+    /**
+     * Generate the code for the C main method.
+     * @param out The file to write to
+     */
     public static void dumpMain(PrintWriter out) {
         ClassInfo entry = getClassInfo(entryClass);
         out.println("int main(int argc, char **argv) {");
