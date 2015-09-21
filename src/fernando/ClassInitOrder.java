@@ -51,7 +51,7 @@ import java.util.logging.Logger;
 public class ClassInitOrder {
 
     /** A map between class names and classes. */
-    private Map<String, ClassInfo> classInfoMap;
+    private Map<String, AbstractClassInfo> classInfoMap;
 
     /** A helper structure for traversing the object graph. */
     private Set<Method> visited = new LinkedHashSet<Method>();
@@ -61,7 +61,7 @@ public class ClassInitOrder {
      * @param classInfoMap A map between class names and classes for
      * all classes in the application.
      */
-    public ClassInitOrder(Map<String, ClassInfo> classInfoMap) {
+    public ClassInitOrder(Map<String, AbstractClassInfo> classInfoMap) {
         this.classInfoMap = classInfoMap;
     }
 
@@ -70,17 +70,17 @@ public class ClassInitOrder {
      * @return A list of classes that is sorted according to the order
      * in which their class initializers should be called.
      */
-    public List<ClassInfo> findOrder() {
-        List<ClassInfo> order = new LinkedList<ClassInfo>();
-        Map<ClassInfo, Set<ClassInfo>> depGraph = new LinkedHashMap<ClassInfo, Set<ClassInfo>>();
-        for (ClassInfo ci : classInfoMap.values()) {
+    public List<AbstractClassInfo> findOrder() {
+        List<AbstractClassInfo> order = new LinkedList<AbstractClassInfo>();
+        Map<AbstractClassInfo, Set<AbstractClassInfo>> depGraph = new LinkedHashMap<AbstractClassInfo, Set<AbstractClassInfo>>();
+        for (AbstractClassInfo ci : classInfoMap.values()) {
             if (ci.findClinit() != null) {
                 depGraph.put(ci, findDeps(ci));
             }
         }
         for (int i = depGraph.size(); i > 0; --i) {
-            for (Map.Entry<ClassInfo, Set<ClassInfo>> e : depGraph.entrySet()) {
-                Set<ClassInfo> val = e.getValue();
+            for (Map.Entry<AbstractClassInfo, Set<AbstractClassInfo>> e : depGraph.entrySet()) {
+                Set<AbstractClassInfo> val = e.getValue();
                 if (val.isEmpty()) {
                     updateOrder(order, depGraph, e.getKey());
                     break;
@@ -89,9 +89,9 @@ public class ClassInitOrder {
         }
         if (!depGraph.isEmpty()) {
             Logger.getGlobal().severe("Cyclic class initializer dependency!");
-            for (Map.Entry<ClassInfo, Set<ClassInfo>> e : depGraph.entrySet()) {
+            for (Map.Entry<AbstractClassInfo, Set<AbstractClassInfo>> e : depGraph.entrySet()) {
                 String msg = e.getKey().getName()+" depends on";
-                for (ClassInfo d : e.getValue()) {
+                for (AbstractClassInfo d : e.getValue()) {
                     msg += " "+d.getName();
                 }
                 Logger.getGlobal().severe(msg);
@@ -108,9 +108,9 @@ public class ClassInitOrder {
      * @param depGraph The dependency graph
      * @param clazz The class to be appended to the order
      */
-    private void updateOrder(List<ClassInfo> order, Map<ClassInfo, Set<ClassInfo>> depGraph, ClassInfo clazz) {
+    private void updateOrder(List<AbstractClassInfo> order, Map<AbstractClassInfo, Set<AbstractClassInfo>> depGraph, AbstractClassInfo clazz) {
         order.add(clazz);
-        for (Set<ClassInfo> d : depGraph.values()) {
+        for (Set<AbstractClassInfo> d : depGraph.values()) {
             d.remove(clazz);
         }
         depGraph.remove(clazz);
@@ -121,8 +121,8 @@ public class ClassInitOrder {
      * @param clazz The class containing the class initializer to be analyzed
      * @return The set of classes that this class initializer depends on
      */
-    public Set<ClassInfo> findDeps(ClassInfo clazz) {
-        Set<ClassInfo> deps = new LinkedHashSet<ClassInfo>();
+    public Set<AbstractClassInfo> findDeps(AbstractClassInfo clazz) {
+        Set<AbstractClassInfo> deps = new LinkedHashSet<AbstractClassInfo>();
         Method clinit = clazz.findClinit();
         if (clinit != null) {
             deps.addAll(findDeps(clazz, clinit));
@@ -136,8 +136,8 @@ public class ClassInitOrder {
      * @param m The method to be analyzed
      * @return The set of classes that the current class depends on
      */
-    private Set<ClassInfo> findDeps(ClassInfo clazz, Method m) {
-        Set<ClassInfo> deps = new LinkedHashSet<ClassInfo>();
+    private Set<AbstractClassInfo> findDeps(AbstractClassInfo clazz, Method m) {
+        Set<AbstractClassInfo> deps = new LinkedHashSet<AbstractClassInfo>();
         visited.add(m);
 
         Code code = m.getCode();
@@ -146,12 +146,12 @@ public class ClassInitOrder {
         for (Instruction i : il.getInstructions()) {
             if (i instanceof CPInstruction) {
                 Type type = ((CPInstruction)i).getType(constPool);
-                ClassInfo ci = ClassInfo.getClassInfo(type.toString());
+                AbstractClassInfo ci = classInfoMap.get(type.toString());
                 addDep(deps, clazz, ci);
             }
             if (i instanceof FieldOrMethod) {
                 Type type = ((FieldOrMethod)i).getReferenceType(constPool);
-                ClassInfo ci = ClassInfo.getClassInfo(type.toString());
+                AbstractClassInfo ci = classInfoMap.get(type.toString());
                 addDep(deps, clazz, ci);
                 if (ci != null && i instanceof InvokeInstruction) {
                     InvokeInstruction ii = (InvokeInstruction)i;
@@ -172,15 +172,15 @@ public class ClassInitOrder {
      * @param name The signature of the invoked method     
      * @return The set of classes that the current class depends on
      */
-    private Set<ClassInfo> findInvokeDeps(ClassInfo clazz, ClassInfo calledClazz, String name, String signature) {
-        Set<ClassInfo> deps = new LinkedHashSet<ClassInfo>();
+    private Set<AbstractClassInfo> findInvokeDeps(AbstractClassInfo clazz, AbstractClassInfo calledClazz, String name, String signature) {
+        Set<AbstractClassInfo> deps = new LinkedHashSet<AbstractClassInfo>();
         for (Method m : calledClazz.getMethods()) {
             if (m.getName().equals(name) &&
                 m.getSignature().equals(signature) &&
                 !visited.contains(m) &&
                 m.getCode() != null) {
 
-                Set<ClassInfo> subDeps = findDeps(calledClazz, m);
+                Set<AbstractClassInfo> subDeps = findDeps(calledClazz, m);
                 subDeps.remove(clazz);
                 deps.addAll(subDeps);
             }
@@ -195,7 +195,7 @@ public class ClassInitOrder {
      * @param clazz The current class
      * @param depClazz The class the current class depends on
      */
-    private void addDep(Set<ClassInfo> deps, ClassInfo clazz, ClassInfo depClazz) {
+    private void addDep(Set<AbstractClassInfo> deps, AbstractClassInfo clazz, AbstractClassInfo depClazz) {
         if (depClazz != null && depClazz != clazz && depClazz.findClinit() != null) {
             deps.add(depClazz);
         }

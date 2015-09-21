@@ -81,7 +81,8 @@ public class Main {
 
         ClassPath cp = new ClassPath(args[0]);
         Repository.setRepository(SyntheticRepository.getInstance(cp));
-        ClassInfo.loadHull(args[1]);
-        ClassInfo.dumpAll(args[2]);
+
+        AppInfo app = new AppInfo(args[1]);
+        app.dumpAll(args[2]);
     }
 }
